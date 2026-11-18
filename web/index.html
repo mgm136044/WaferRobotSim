@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>웨이퍼 이송 로봇 주행 시뮬레이터</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">{ "imports": { "three": "./vendor/three/three.module.js" } }</script>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">◆</span>
+      <div>
+        <div class="title">웨이퍼 이송 로봇 주행 시뮬레이터</div>
+        <div class="subtitle">PRIZM Pro(ESP32-S3) 스케치를 수정 없이 그대로 컴파일·실행</div>
+      </div>
+    </div>
+    <div class="project">
+      <div id="projName" class="proj-name">스케치 없음</div>
+      <div id="projStatus" class="proj-status">폴더나 ZIP을 열어 주세요</div>
+    </div>
+    <div class="actions">
+      <button id="btnOpenFolder" title="스케치 폴더 통째로 열기">📁 폴더 열기</button>
+      <button id="btnOpenZip" title="ZIP 파일 열기">🗜 ZIP 열기</button>
+      <button id="btnExample" title="간단한 주행 예제 불러오기">예제</button>
+      <button id="btnRun" class="primary" title="Ctrl+Enter">▶ 컴파일 &amp; 실행</button>
+      <button id="btnStop" disabled>■ 정지</button>
+      <button id="btnHelp">사용법</button>
+    </div>
+    <input id="inpFolder" type="file" webkitdirectory directory multiple hidden />
+    <input id="inpZip" type="file" accept=".zip" hidden />
+    <input id="inpParams" type="file" accept=".json" hidden />
+  </header>
+
+  <main>
+    <section id="left">
+      <div class="pane-head">
+        <span>코드</span>
+        <div id="fileTabs" class="file-tabs"></div>
+        <div class="spacer"></div>
+        <button id="btnRevert" class="small" title="이 파일을 불러온 원본으로 되돌리기">원본 복원</button>
+        <button id="btnExportZip" class="small" title="현재 코드를 ZIP으로 저장 (실물 업로드용)">ZIP 저장</button>
+      </div>
+      <div id="editorWrap" class="editor-wrap">
+        <pre id="gutter" class="gutter"></pre>
+        <textarea id="editor" spellcheck="false" wrap="off" placeholder="스케치 폴더(.ino + .cpp/.h)나 ZIP을 이 창에 끌어다 놓으세요."></textarea>
+      </div>
+      <div class="pane-head">
+        <div class="tabs" id="consoleTabs">
+          <button data-tab="serial" class="active">시리얼 모니터</button>
+          <button data-tab="build">컴파일 로그</button>
+          <button data-tab="events">이벤트</button>
+        </div>
+        <div class="spacer"></div>
+        <label class="chk"><input type="checkbox" id="chkSyncSerial" checked /> 재생 시각에 맞춤</label>
+      </div>
+      <div class="console-wrap">
+        <pre id="serialOut" class="console active"></pre>
+        <pre id="buildOut" class="console"></pre>
+        <div id="eventsOut" class="console"></div>
+      </div>
+    </section>
+
+    <div id="splitter" title="드래그로 너비 조절"></div>
+
+    <section id="right">
+      <div id="view3d">
+        <div class="hud" id="hud"></div>
+        <div class="cam-buttons">
+          <button data-cam="overview">전체</button>
+          <button data-cam="top">위</button>
+          <button data-cam="side">옆</button>
+          <button data-cam="follow">따라가기</button>
+        </div>
+        <div id="dropHint" class="drop-hint">여기에 스케치 폴더/ZIP을 놓으세요</div>
+      </div>
+      <div class="transport">
+        <button id="btnPlay" title="재생/일시정지 (Space)">▶</button>
+        <button id="btnStepBack" title="0.1초 뒤로 (←)">−0.1s</button>
+        <button id="btnStepFwd" title="0.1초 앞으로 (→)">+0.1s</button>
+        <select id="selSpeed" title="재생 배속">
+          <option value="0.1">0.1×</option><option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option>
+          <option value="10">10×</option><option value="30">30×</option>
+        </select>
+        <input id="timeline" type="range" min="0" max="1000" value="0" step="1" />
+        <span id="timeLabel" class="mono">0.000 / 0.000 s</span>
+        <span id="runStatus" class="run-status">대기</span>
+      </div>
+      <div class="pane-head">
+        <div class="tabs" id="rightTabs">
+          <button data-tab="charts" class="active">그래프</button>
+          <button data-tab="analysis">분석·점수</button>
+          <button data-tab="settings">로봇·경기장 설정</button>
+          <button data-tab="calib">실측 비교</button>
+        </div>
+      </div>
+      <div class="tabpanes">
+        <div id="pane-charts" class="tabpane active"><div id="charts"></div>
+          <div class="hint">그래프: 클릭=그 시각으로 이동 · 휠=확대/축소 · 드래그=이동 · 더블클릭=전체</div></div>
+        <div id="pane-analysis" class="tabpane"><div id="analysisOut" class="analysis">실행하면 정지 위치·라인 오차·예상 점수가 여기에 나옵니다.</div></div>
+        <div id="pane-settings" class="tabpane">
+          <div class="settings-bar">
+            <label>경기장 프리셋 <select id="selField"></select></label>
+            <button id="btnParamsDefault" class="small">기본값</button>
+            <button id="btnParamsExport" class="small">설정 내보내기(JSON)</button>
+            <button id="btnParamsImport" class="small">설정 가져오기</button>
+            <span id="paramsDirty" class="dirty"></span>
+          </div>
+          <div id="paramsForm" class="params"></div>
+        </div>
+        <div id="pane-calib" class="tabpane">
+          <div class="calib">
+            <p>실물 시리얼 로그(<code>BASE_TRACE,…</code> 줄 포함)를 붙여 넣으면, 같은 순서의 시뮬레이션 BASE_TRACE와 엔코더 속도를 겹쳐 그립니다.
+               차이가 크면 <b>설정 → PRIZM 속도제어 / 구동</b> 값을 조정하세요.</p>
+            <textarea id="calibInput" placeholder="여기에 실물 시리얼 모니터 로그를 붙여 넣기"></textarea>
+            <div class="calib-bar"><button id="btnCalib" class="small">비교하기</button><select id="selCalibBlock"></select><span id="calibInfo"></span></div>
+            <canvas id="calibCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="helpDlg">
+    <div class="help" id="helpBody"></div>
+    <form method="dialog"><button class="primary">닫기</button></form>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
