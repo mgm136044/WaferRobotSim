@@ -14,8 +14,19 @@ static void warn_missing(int bus, uint8_t addr) {
          bus ? "Wire1" : "Wire", addr);
 }
 
+static int debug_i2c = -1;
+static void log_i2c(char kind, int bus, uint8_t addr, const uint8_t *d, size_t n) {
+  if (debug_i2c < 0) debug_i2c = P("debug.i2c", 0) != 0;
+  if (!debug_i2c) return;
+  char buf[200];
+  int k = snprintf(buf, sizeof buf, "%c%d@%02X:", kind, bus, addr);
+  for (size_t i = 0; i < n && k < (int)sizeof buf - 4; ++i) k += snprintf(buf + k, sizeof buf - k, "%02X", d[i]);
+  event(9, bus, addr, (double)n, buf);
+}
+
 int i2c_write(int bus, uint8_t addr, const uint8_t *d, size_t n) {
   i2c_transactions++;
+  log_i2c('W', bus, addr, d, n);
   if (bus == 1) {
     if (addr == 5) return dc_chip_write(d, n);
     if (addr == 6) return servo_chip_write(d, n);
@@ -33,6 +44,7 @@ int i2c_write(int bus, uint8_t addr, const uint8_t *d, size_t n) {
 
 size_t i2c_read(int bus, uint8_t addr, uint8_t *out, size_t n) {
   i2c_transactions++;
+  log_i2c('R', bus, addr, nullptr, n);
   if (bus == 1) {
     if (addr == 5) return dc_chip_read(out, n);
     if (addr == 6) return servo_chip_read(out, n);

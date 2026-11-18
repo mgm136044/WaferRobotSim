@@ -290,9 +290,9 @@ void can_init() {
   units_per_rev = P("arm.unitsPerRev", 10000);
   window_units = P("arm.positionWindow", 20);
   homing_rpm = P("arm.homingRpm", 60);
-  sdo_latency_us = P("can.sdoLatencyMs", 0.5) * 1000;
+  sdo_latency_us = P("can.sdoLatencyMs", 1.0) * 1000;
   debug_sdo = P("debug.sdo", 0) != 0;
-  adapter_latency_us = P("can.adapterLatencyMs", 0.2) * 1000;
+  adapter_latency_us = P("can.adapterLatencyMs", 0.8) * 1000;
   can_frame_us = 1e6 * 130.0 / P("can.bitrate", 500000);
   for (int i = 0; i < 2; ++i) {
     drives[i] = Drive();
