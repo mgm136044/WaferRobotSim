@@ -430,14 +430,15 @@ void world_step(double dt) {
   if (rear_end < 0) {
     x_m = prm.rear_overhang_mm / 1000.0;
     if (v_ms < 0) {
-      if (collision != -1) eventf(EV_COLLISION, -1, v_ms * 1000, 0, "rear wall hit at %.0f mm/s", v_ms * 1000);
+      // a resting re-contact (< 1 mm/s) right after a hit is not a new collision
+      if (collision != -1 && v_ms < -0.001) eventf(EV_COLLISION, -1, v_ms * 1000, 0, "rear wall hit at %.0f mm/s", v_ms * 1000);
       v_ms = 0;
     }
     collision = -1;
   } else if (front_end > prm.track_len_mm) {
     x_m = (prm.track_len_mm - (prm.length_mm - prm.rear_overhang_mm)) / 1000.0;
     if (v_ms > 0) {
-      if (collision != 1) eventf(EV_COLLISION, 1, v_ms * 1000, 0, "front wall hit at %.0f mm/s", v_ms * 1000);
+      if (collision != 1 && v_ms > 0.001) eventf(EV_COLLISION, 1, v_ms * 1000, 0, "front wall hit at %.0f mm/s", v_ms * 1000);
       v_ms = 0;
     }
     collision = 1;
