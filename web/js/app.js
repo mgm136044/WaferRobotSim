@@ -3,7 +3,7 @@
 import { View3D } from './view3d.js';
 import { ChartGroup } from './charts.js';
 import { F, FRAME_SIZE } from './sim-host.js';
-import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry, robotGeometry, PARAMS_VERSION, migrateParams } from './params.js';
+import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry, robotGeometry, PARAMS_VERSION, migrateParams, validateParams } from './params.js';
 import { analyseRun } from './analysis.js';
 import { readZip, writeZip, decodeText } from './zip.js';
 import { locateSketch } from './sketch-build.js';
@@ -14,6 +14,8 @@ const $ = (id) => document.getElementById(id);
 const SRC_RE = /\.(ino|pde|cpp|c|cc|cxx|h|hpp|hh|hxx|S|inc|tpp|ipp)$/i;
 
 // ------------------------------------------------------------------ state
+// keys from an older saved version that were replaced on load (filled by loadParams)
+var droppedOnLoad = [];
 const state = {
   files: {},          // path -> text (current, possibly edited)
   original: {},       // path -> text (as loaded)
@@ -39,11 +41,12 @@ const state = {
 function loadParams() {
   const p = defaultParams();
   try {
-    const saved = migrateParams(JSON.parse(localStorage.getItem('wafersim.params') || '{}'));
+    const saved = migrateParams(JSON.parse(localStorage.getItem('wafersim.params') || '{}'), droppedOnLoad);
     for (const [k, v] of Object.entries(saved)) if (k in p) p[k] = v;
   } catch {}
   return p;
 }
+const paramLabel = (k) => { const sp = PARAM_SPECS.find((x) => x[0] === k); return sp ? sp[2] : k; };
 function saveParams() { localStorage.setItem('wafersim.params', JSON.stringify({ ...state.params, _v: PARAMS_VERSION })); }
 
 const DB = (() => {
@@ -97,12 +100,15 @@ charts.add({
   ],
 });
 charts.add({
-  title: '가운데 레일 (가이드 롤러 좌우 편차 mm · 접촉력 N)',
+  title: '가운데 레일: 가이드 롤러 좌우 편차 (mm, 왼쪽 +)',
   series: [
-    { key: 'guideF', label: '앞 가이드 편차', color: '#4fa3ff' },
-    { key: 'guideR', label: '뒤 가이드 편차', color: '#3ccf7e' },
-    { key: 'railF', label: '레일 접촉력 (N)', color: '#ff6b6b' },
+    { key: 'guideF', label: '앞축 가이드', color: '#4fa3ff' },
+    { key: 'guideR', label: '뒤축 가이드', color: '#3ccf7e' },
   ],
+});
+charts.add({
+  title: '가운데 레일: 접촉력 (N)',
+  series: [{ key: 'railF', label: '롤러가 레일을 미는 힘', color: '#ff6b6b' }],
 });
 charts.add({
   title: '팔 · Z축',
@@ -381,6 +387,11 @@ async function runAll() {
 function startRun(wasm) {
   resetRun();
   state.paramsAtRun = { ...state.params };
+  const chk = validateParams(state.paramsAtRun);
+  if (chk.warnings.length) {
+    appendBuild('설정 점검:\n' + chk.warnings.map((w) => ' - ' + w).join('\n') + '\n', 'err');
+    setStatus('설정 점검 경고 ' + chk.warnings.length + '건 (컴파일 로그 참고)');
+  }
   view.build(state.paramsAtRun);
   $('paramsDirty').textContent = '';
   state.running = true;
@@ -739,9 +750,12 @@ $('inpParams').onchange = async (e) => {
     const obj = JSON.parse(await f.text());
     const p = defaultParams();
     // an exported field choice is explicit, keep it; robot geometry from older versions is outdated
-    const kept = migrateParams(obj);
+    const dropped = [];
+    const kept = migrateParams(obj, dropped);
     for (const [k, v] of Object.entries(obj)) if (k.startsWith('field.') && k in p) kept[k] = v;
     for (const [k, v] of Object.entries(kept)) if (k in p) p[k] = v;
+    const really = dropped.filter((k) => !k.startsWith('field.') && k in p);
+    if (really.length) alert(`이전 버전 설정 파일이라 로봇 형상 값 ${really.length}개는 지금 실측값으로 바꿨습니다:\n` + really.map((k) => `- ${paramLabel(k)}: ${obj[k]} → ${p[k]}`).join('\n'));
     state.params = p;
     saveParams();
     renderParams();
@@ -848,7 +862,7 @@ renderHud(null);
 showIdleRobot();
 function showIdleRobot() {
   const f = new Float32Array(FRAME_SIZE);
-  f[F.x] = Number(state.params['robot.startAxleMm']);
+  f[F.x] = robotGeometry(state.params).start;
   f[F.z] = Number(state.params['z.initialMm']);
   f[F.j1] = Number(state.params['arm.initialJ1']);
   f[F.j2] = Number(state.params['arm.initialJ2']);
@@ -865,6 +879,12 @@ function showIdleRobot() {
     state.active = saved.active;
     renderFiles();
     setStatus('지난번에 열었던 스케치를 불러왔습니다 (이 브라우저에만 저장됨)');
+  }
+  const defs = defaultParams();
+  const changed = droppedOnLoad.filter((k) => k in defs);
+  if (changed.length) {
+    saveParams();
+    setStatus(`예전 버전에서 저장한 설정 중 ${changed.length}개를 지금 실측값으로 바꿨습니다: ` + changed.map((k) => `${paramLabel(k)} → ${defs[k]}`).join(', '));
   }
   // warm up the compiler in the background so the first run is faster
   setTimeout(() => getCompileWorker().postMessage({ type: 'warmup' }), 1500);

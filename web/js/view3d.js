@@ -186,10 +186,10 @@ export class View3D {
     this.sensorMeshes = [];
     rg.sensors.forEach((sn, i) => {
       const sm = add(new THREE.Mesh(new THREE.BoxGeometry(24, 14, 24), mat(COLORS.sensorOff, { emissive: 0x000000 })), `sensor-${sn.port}`);
-      sm.position.set(rg.rail.width / 2 + 35, 12, sn.s);
+      sm.position.set(rg.sensorLateral, 12, sn.s);
       const lbl = textSprite(String(sn.port), 70, '#c0392b');
       lbl.scale.set(50, 50, 1);
-      lbl.position.set(rg.rail.width / 2 + 75, 30, sn.s);
+      lbl.position.set(rg.sensorLateral + 40, 30, sn.s);
       r.add(lbl);
       this.sensorMeshes.push(sm);
     });
