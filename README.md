@@ -68,4 +68,11 @@ npm run serve          # http://localhost:8080
 node tools/run-sketch.mjs ../Wafer_Transfer_Robot_final --csv out.csv
 ```
 
+## 검증
+
+`node tools/verify.mjs --zip <팀 스케치 zip> --real-log <실물 시리얼 로그> --prizm-lib <TETRIX_PRIZM_PRO 폴더>`
+→ 요구사항별 측정 기준으로 검사하고 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 다시 씁니다
+(원본 무수정 여부, 전체 미션 완주, 실측 BASE_TRACE·CAN 시간 재현, 원본 PRIZM 라이브러리와 I2C 바이트 일치, 물리 일관성, 경기장 치수).
+팀 코드와 PRIZM 라이브러리는 지정한 경로에서 읽기만 하고 저장소에 넣지 않습니다.
+
 실물과의 차이점은 [docs/DIFFERENCES.md](docs/DIFFERENCES.md) 참고.
