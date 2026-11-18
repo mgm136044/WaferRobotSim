@@ -132,9 +132,9 @@ static void load_params() {
   prm.roll_visc = P("robot.rollViscous", 5.0);
   prm.length_mm = P("robot.lengthMm", 480);
   prm.rear_overhang_mm = P("robot.rearOverhangMm", 270);
-  prm.passive_s = P("geom.passiveAxleS", -218.5) / 1000.0;
+  prm.passive_s = P("geom.passiveAxleS", -224) / 1000.0;
   prm.front_axle_s = P("geom.frontAxleS", 0) / 1000.0;
-  prm.rear_axle_s = P("geom.rearAxleS", -218.5) / 1000.0;
+  prm.rear_axle_s = P("geom.rearAxleS", -224) / 1000.0;
   prm.track = P("robot.trackMm", 320) / 1000.0;
   prm.right_scale = P("drive.rightWheelScale", 1.0);
   prm.rail_on = P("rail.enabled", 1) != 0;
@@ -159,7 +159,7 @@ static void load_params() {
   const char *pk[6] = {"sensor.0.port", "sensor.1.port", "sensor.2.port", "sensor.3.port", "sensor.4.port", "sensor.5.port"};
   const char *ok[6] = {"geom.sensor.0.s", "geom.sensor.1.s", "geom.sensor.2.s", "geom.sensor.3.s", "geom.sensor.4.s", "geom.sensor.5.s"};
   const int defport[6] = {4, 5, 1, 2, 3, 6};
-  const double defoff[6] = {71.5, -147, 0, 0, 0, 0};
+  const double defoff[6] = {65, -139, 0, 0, 0, 0};
   for (int i = 0; i < prm.sensor_count; ++i) {
     prm.sensor_port[i] = (int)P(pk[i], defport[i]);
     prm.sensor_offset[i] = P(ok[i], defoff[i]);
