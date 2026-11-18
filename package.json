@@ -1,0 +1,15 @@
+{
+  "name": "wafer-robot-sim",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser simulator that runs the unmodified PRIZM Pro (ESP32-S3) driving sketch of the wafer transfer robot",
+  "scripts": {
+    "build": "node tools/build-runtime.mjs",
+    "serve": "node tools/serve.mjs",
+    "run-sketch": "node tools/run-sketch.mjs"
+  },
+  "dependencies": {
+    "@yowasp/clang": "21.1.4-3"
+  }
+}
