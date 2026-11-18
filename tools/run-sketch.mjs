@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareBuild, toTree } from '../web/js/sketch-build.js';
 import { runSketch, F, FRAME_SIZE } from '../web/js/sim-host.js';
-import { defaultParams, fieldGeometry, resolveParams } from '../web/js/params.js';
+import { defaultParams, fieldGeometry, resolveParams, validateParams } from '../web/js/params.js';
 import { analyseRun } from '../web/js/analysis.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +35,7 @@ function readDir(d, base = '') {
   return out;
 }
 
+for (const w of validateParams(params).warnings) console.log('설정 점검: ' + w);
 const files = readDir(path.resolve(dir), path.basename(path.resolve(dir)));
 const rtMeta = JSON.parse(fs.readFileSync(path.join(root, 'web/rt/runtime.json'), 'utf8'));
 const objects = {};

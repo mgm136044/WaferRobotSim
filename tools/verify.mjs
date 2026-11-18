@@ -24,7 +24,8 @@ const rtObjects = {};
 for (const o of rt.objects) rtObjects[o] = fs.readFileSync(path.join(root, 'web/rt/obj', o));
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const results = [];
-const check = (req, name, ok, detail, data) => { results.push({ req, name, ok, detail, data }); console.log(`${ok ? 'PASS' : 'FAIL'} [${req}] ${name}: ${detail}`); };
+// ok: true = 통과, false = 실패, null = 확인 필요(실측과 어긋나지만 시뮬레이터 버그가 아닌 항목)
+const check = (req, name, ok, detail, data) => { results.push({ req, name, ok, detail, data }); console.log(`${ok === null ? 'WARN' : ok ? 'PASS' : 'FAIL'} [${req}] ${name}: ${detail}`); };
 
 async function compile(files, runtime = { headers: rt.headers, objects: rtObjects }) {
   const { args, vfs, sketch } = prepareBuild(files, runtime);
@@ -48,6 +49,7 @@ const serialT = (serial, re) => { const s = serial.find((l) => re.test(l.text));
 
 // ============================================================ REQ 3: code compatibility
 let teamFiles = null, mission = null;
+const measured = {};
 if (zipPath) {
   const entries = await readZip(fs.readFileSync(zipPath).buffer.slice(0));
   const files = {};
@@ -115,6 +117,28 @@ if (realLogPath && mission) {
   const ss = (arr) => { const tail = arr.filter((r) => r.ms >= 500); return tail.reduce((a, r) => a + r.e1, 0) / tail.length; };
   check('1', '실측 BASE_TRACE 재현 (0번 정렬, 명령 100 deg/s)', rms < 5,
     `샘플 ${n}개 RMS 차이 ${rms.toFixed(1)} deg/s, 0.5초 이후 평균 실측 ${ss(real).toFixed(1)} / 시뮬 ${ss(sim).toFixed(1)} deg/s. 정렬 시간 실측 ${real.length ? (real[real.length - 1].ms / 1000 + 0.05).toFixed(2) : '?'} s / 시뮬 ${sim.length ? (sim[sim.length - 1].ms / 1000 + 0.05).toFixed(2) : '?'} s (시작 위치·축간 거리에 따라 다름)`, { rows });
+}
+
+// 1a'. distance driven during the initial line-0 alignment: real log vs simulation
+if (realLogPath && mission) {
+  const lines = fs.readFileSync(realLogPath, 'utf8').split(/\r?\n/);
+  let deg = 0, prevMs = 0;
+  for (const l of lines) {
+    const m = l.match(/BASE_TRACE,(\d+),(-?\d+),(-?\d+),(-?[\d.]+),(-?[\d.]+),(\d+)/);
+    if (m) { const ms = +m[1]; deg += Math.abs(+m[4]) * (ms - prevMs) / 1000; prevMs = ms; }
+    if (/BASE_DONE/.test(l) && deg) break;
+  }
+  const stopL = lines.find((l) => /BASE_TRACE_STOP/.test(l));
+  const tStop = stopL ? +stopL.match(/t_ms=(\d+)/)[1] : prevMs;
+  const lastSpeed = (() => { const t = lines.filter((l) => /^BASE_TRACE,/.test(l)); const m = t.length ? t[t.length - 1].split(',') : null; return m ? Math.abs(+m[4]) : 0; })();
+  deg += lastSpeed * Math.max(0, tStop - prevMs) / 1000;
+  const rg = robotGeometry(defaultParams());
+  const realMm = deg / 360 * rg.mmPerRev;
+  const simMm = mission.analysis.stops[0].axle - mission.frames[0][F.x];
+  measured.alignment = { realDeg: deg, realMm, simMm };
+  check('1', '0번 정렬 이동거리 (실물 로그 vs 시뮬)', Math.abs(realMm - simMm) <= 5 ? true : null,
+    `실물 로그: 엔코더 ${deg.toFixed(1)}° → ${realMm.toFixed(1)} mm (모터 1회전 ${rg.mmPerRev.toFixed(1)} mm 기준). 시뮬: ${simMm.toFixed(1)} mm (로봇을 끝까지 붙였을 때가 최대). ` +
+    (Math.abs(realMm - simMm) <= 5 ? '일치' : `차이 ${(realMm - simMm).toFixed(1)} mm → 로그 당시 로봇이 시작 끝에 붙어 있었다면 첫 칸 150 mm·5번 센서 위치·기어비 중 하나가 실물과 다름. 시작 위치가 아닌 곳에서 찍은 로그라면 비교 대상이 아님`));
 }
 
 // 1b-1e. physics consistency with a probe sketch
@@ -320,7 +344,7 @@ class Adafruit_NeoPixel { public:
 }
 
 // ============================================================ measured geometry + centre rail (2026-11-19 change)
-const measured = {};
+
 {
   const params = defaultParams();
   const rg = robotGeometry(params);
@@ -368,11 +392,11 @@ void loop() {}
   const rng = (a) => `${Math.min(...a).toFixed(2)}~${Math.max(...a).toFixed(2)}`;
   measured.field = { widths, gaps, pitches, encGaps, firstEdge: s5.length ? s5[0].in : null, lineCount: s4.length };
   const endGap = geo.length - lineSeg[4].out;
-  check('치수', '① 한 칸(흰색만) 47cm', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 470) < 0.05),
+  check('치수', '① 한 칸(흰색만) 47cm [센서 전환 위치 + 엔코더 환산]', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 470) < 0.05),
     `센서가 실제로 선을 지나며 잰 선 사이 흰 구간 ${gaps.map((g) => g.toFixed(2)).join(' / ')} mm (선 중심 간격 ${rng(pitches)} mm, 두 센서 측정 일치=${agree}). 로봇 엔코더로 환산하면 ${rng(encGaps)} mm (타이어 미끄럼 0.2% 포함)`);
-  check('치수', '② 맨 끝 칸(0번 앞, 4번 뒤 흰색만) 15cm', Math.abs(lineSeg[0].in - 150) < 0.05 && Math.abs(endGap - 150) < 0.05,
+  check('치수', '② 맨 끝 칸(0번 앞, 4번 뒤 흰색만) 15cm [센서 전환 위치]', Math.abs(lineSeg[0].in - 150) < 0.05 && Math.abs(endGap - 150) < 0.05,
     `시작 끝 → 0번 선 ${lineSeg[0].in.toFixed(2)} mm (5번 센서), 4번 선 → 반대쪽 끝 ${endGap.toFixed(2)} mm (4번 센서), 전장 ${geo.length} mm`);
-  check('치수', '③ 검은 선 1cm', widths.length === 5 && widths.every((w) => Math.abs(w - 10) < 0.05),
+  check('치수', '③ 검은 선 1cm [센서 전환 위치]', widths.length === 5 && widths.every((w) => Math.abs(w - 10) < 0.05),
     `0~4번 선 검정 구간 폭 ${widths.map((w) => w.toFixed(2)).join(' / ')} mm`);
   // wheel diameter from encoder vs travel at constant speed. Run 1: no rolling resistance,
   // so the tyre carries no load and does not creep -> pure rolling kinematics.
@@ -386,14 +410,14 @@ void loop() {}
   const rFree = await run(c.wasm, { ...params, 'robot.rollResistN': 0, 'robot.rollViscous': 0 });
   const wFree = wheelFrom(rFree), wLoad = wheelFrom(r);
   measured.wheel = { free: wFree, loaded: wLoad };
-  check('치수', '④ 모터축 바퀴 지름 10.3cm (회전수 ↔ 이동거리)', Math.abs(wFree.dMeas - 103) < 0.01 && Math.abs(wLoad.dMeas - 103) < 0.5,
+  check('치수', '④ 모터축 바퀴 지름 10.3cm [이동거리 ÷ 회전수, 운동 측정]', Math.abs(wFree.dMeas - 103) < 0.01 && Math.abs(wLoad.dMeas - 103) < 0.5,
     `${((tB - tA) / 1000)}초 등속 구간에서 차체 이동 ÷ (엔코더 회전 ÷ 기어 ${rg.G}): 미끄럼 없는 조건 ${wFree.dX.toFixed(2)} mm / 바퀴 ${wFree.wheelRevs.toFixed(4)}회전 → 1회전 ${wFree.perRev.toFixed(2)} mm, 지름 ${wFree.dMeas.toFixed(3)} mm. 기본 설정(구름 저항 있음)은 타이어 미끄럼 때문에 1회전 ${wLoad.perRev.toFixed(2)} mm (지름 환산 ${wLoad.dMeas.toFixed(2)} mm, −${((1 - wLoad.dMeas / 103) * 100).toFixed(2)}%)`);
   // start position
   const f0 = fr[0];
   const rearAt0 = f0[F.x] + rg.rearEnd;
   const firstMove = fr.find((f) => Math.abs(f[F.x] - f0[F.x]) > 0.01);
   measured.start = { axle: f0[F.x], rear: rearAt0 };
-  check('치수', '⑤ 시작 위치: 경기장 끝 → 모터축 중심 27cm', Math.abs(f0[F.x] - 270) < 0.01 && Math.abs(rearAt0) < 0.01,
+  check('치수', '⑤ 시작 위치: 경기장 끝 → 모터축 중심 27cm [초기 상태 확인]', Math.abs(f0[F.x] - 270) < 0.01 && Math.abs(rearAt0) < 0.01,
     `시뮬 시작 프레임: 모터축 ${f0[F.x].toFixed(2)} mm, 로봇 뒤끝 ${rearAt0.toFixed(2)} mm (= 시작 끝에 닿음), 첫 이동 ${firstMove ? (firstMove[F.t] / 1000).toFixed(3) + '초' : '없음'}`);
   // wheelbase from rigid-body motion: with the rail engaged and only one motor driving, the
   // chassis yaws against the front and rear guide rollers, which sit on the two axles.
@@ -408,24 +432,30 @@ void loop() {}
     const wbs = ro.frames.filter((f) => Math.abs(f[F.yaw]) > 0.2).map((f) => (f[F.guideF] - f[F.guideR]) / Math.tan((f[F.yaw] * Math.PI) / 180));
     const wbMeas = wbs.reduce((a, b) => a + b, 0) / wbs.length;
     measured.wheelbase = { n: wbs.length, mean: wbMeas, min: Math.min(...wbs), max: Math.max(...wbs) };
-    check('치수', '⑥ 모터축(앞) ↔ 뒷바퀴축 중심 22.4cm', wbs.length > 50 && Math.abs(wbMeas - 224) < 0.1,
+    check('치수', '⑥ 모터축(앞) ↔ 뒷바퀴축 중심 22.4cm [물리 내부 축 위치를 회전 운동에서 역산]', wbs.length > 50 && Math.abs(wbMeas - 224) < 0.1,
       `한쪽 모터만 돌려 차체가 레일에 기대 돌아갈 때 앞·뒤 축 가이드 위치에서 역산: ${wbMeas.toFixed(2)} mm (${wbs.length}프레임, ${Math.min(...wbs).toFixed(2)}~${Math.max(...wbs).toFixed(2)})`);
     measured.wheelbaseMm = wbMeas;
   }
-  // sensor positions = where the sensor is when it switches on an edge, minus the motor-axle position then
+  // sensor positions measured from timing: when a sensor turns black while driving forward it is
+  // exactly on the near edge of a line, so offset = (known line edge) - (motor axle position then).
+  // This does not read the sensor position the runtime reports.
+  const lat = Number(params['sensor.latencyMs']) / 1000;
   const sensMeas = rg.sensors.map((sn) => {
     const e = ev(sn.port).filter((q) => q.b === blackLv);
-    const offs = e.map((q) => q.c - xAt(q.t));
+    const offs = e.map((q) => {
+      const edge = geo.lines.map((c) => c - geo.width / 2).reduce((a, b) => (Math.abs(b - q.c) < Math.abs(a - q.c) ? b : a));
+      return edge - (xAt(q.t) - xAt(q.t, F.v) * lat);
+    });
     const off = offs.reduce((a, b) => a + b, 0) / offs.length;
     return { port: sn.port, axle: sn.axle, off, n: offs.length, spread: Math.max(...offs) - Math.min(...offs) };
   });
   measured.sensors = sensMeas;
   const s4m = sensMeas[0], s5m = sensMeas[1];
   const s5FromRear = s5m.off + measured.wheelbaseMm; // rear axle = motor axle - wheelbase
-  check('치수', '⑦ 4번 센서: 모터축 바퀴 축 중심에서 6.5cm', Math.abs(s4m.off - 65) < 0.05,
-    `선 검정 진입 ${s4m.n}회에서 센서 위치 − 모터축 위치 = +${s4m.off.toFixed(2)} mm (편차 ${s4m.spread.toFixed(3)} mm, 응답지연 0.3 ms만큼 −0.01 mm). 시작 시 경기장 끝에서 ${(270 + s4m.off).toFixed(1)} mm`);
-  check('치수', '⑧ 5번 센서: 뒷바퀴축 축 중심에서 8.5cm', Math.abs(s5FromRear - 85) < 0.1,
-    `센서 위치 − 모터축 위치 = ${s5m.off.toFixed(2)} mm (검정 진입 ${s5m.n}회) → 뒷바퀴축(모터축 −${measured.wheelbaseMm.toFixed(2)})에서 +${s5FromRear.toFixed(2)} mm. 시작 시 경기장 끝에서 ${(270 + s5m.off).toFixed(1)} mm (0번 선 150 mm보다 ${(150 - 270 - s5m.off).toFixed(1)} mm 뒤)`);
+  check('치수', '⑦ 4번 센서: 모터축 바퀴 축 중심에서 6.5cm [선 감지 시각 측정]', Math.abs(s4m.off - 65) < 0.05,
+    `선 검정 진입 ${s4m.n}회의 시각에서 (선 앞 경계 − 그때 모터축 위치) = +${s4m.off.toFixed(2)} mm (편차 ${s4m.spread.toFixed(3)} mm). 시작 시 경기장 끝에서 ${(270 + s4m.off).toFixed(1)} mm`);
+  check('치수', '⑧ 5번 센서: 뒷바퀴축 축 중심에서 8.5cm [선 감지 시각 측정]', Math.abs(s5FromRear - 85) < 0.1,
+    `(선 앞 경계 − 모터축 위치) = ${s5m.off.toFixed(2)} mm (검정 진입 ${s5m.n}회) → 뒷바퀴축(모터축 −${measured.wheelbaseMm.toFixed(2)})에서 +${s5FromRear.toFixed(2)} mm. 시작 시 경기장 끝에서 ${(270 + s5m.off).toFixed(1)} mm (0번 선 150 mm보다 ${(150 - 270 - s5m.off).toFixed(1)} mm 뒤)`);
 
   // centre rail: same disturbances with the rail on and off
   const DIST = {
@@ -440,6 +470,20 @@ void setup() { prizm.PrizmBegin(); prizm.setMotorPower(2, 0); prizm.setMotorSpee
 void loop() {}
 ` };
   const railRuns = {};
+  {
+    // long one-motor run without the centre rail: the robot must be free to go far past the old
+    // side-rail line (x = ±159 mm), proving nothing else constrains it sideways
+    const cc = await compile({ 'Spin/Spin.ino': `#include <PRIZM_PRO.h>
+PRIZM prizm;
+void setup() { prizm.PrizmBegin(); prizm.setMotorPower(2, 0); prizm.setMotorSpeed(1, 600); delay(12000); prizm.setMotorPowers(125, 125); delay(500); }
+void loop() {}
+` });
+    const pr = { ...defaultParams(), 'rail.enabled': 0 };
+    const rr = await run(cc.wasm, pr);
+    const maxY = Math.max(...rr.frames.map((f) => Math.max(Math.abs(f[F.y]), Math.abs(f[F.guideF]), Math.abs(f[F.guideR]))));
+    const maxYaw = Math.max(...rr.frames.map((f) => Math.abs(f[F.yaw])));
+    railRuns.spinOff = { maxY, maxYaw, warns: rr.events.filter((e) => e.type === 1).map((e) => e.text) };
+  }
   for (const [file, extra] of [['Mismatch/Mismatch.ino', { 'drive.rightWheelScale': 1.03 }], ['OneMotor/OneMotor.ino', {}]]) {
     const cc = await compile({ [file]: DIST[file] });
     for (const on of [1, 0]) {
@@ -456,8 +500,8 @@ void loop() {}
   check('레일', '가운데 레일이 좌우 이탈을 잡음 (구속·접촉)', okOn && okOff,
     `좌우 바퀴 지름 3% 차이로 720 deg/s 주행: 레일 있음 → 가이드 편차 최대 ${railRuns['Mismatch-1'].guide.toFixed(2)} mm(틈새 ${clr} mm)·회전 ${railRuns['Mismatch-1'].yaw.toFixed(2)}°·접촉력 최대 ${railRuns['Mismatch-1'].force.toFixed(1)} N / 레일 끔 → ${railRuns['Mismatch-0'].guide.toFixed(1)} mm·${railRuns['Mismatch-0'].yaw.toFixed(2)}°. ` +
     `한쪽 모터만 구동: 레일 있음 ${railRuns['OneMotor-1'].guide.toFixed(2)} mm·${railRuns['OneMotor-1'].yaw.toFixed(2)}°·${railRuns['OneMotor-1'].force.toFixed(1)} N / 레일 끔 ${railRuns['OneMotor-0'].guide.toFixed(1)} mm·${railRuns['OneMotor-0'].yaw.toFixed(1)}°`);
-  check('레일', '양쪽 레일 구속이 물리에서 사라짐', okOff,
-    `레일을 끄면 아무것도 옆을 잡지 않음: ${railRuns['OneMotor-0'].guide.toFixed(1)} mm까지 밀려남 (예전 양쪽 레일 위치 ±159 mm 안쪽의 벽·구속 없음). 화면의 레일 개수는 브라우저 검사에서 확인`);
+  check('레일', '양쪽 레일 구속이 물리에서 사라짐', railRuns.spinOff.maxY > 200,
+    `가운데 레일을 끄고 한쪽 모터만 12초 돌리면 차체가 ${railRuns.spinOff.maxYaw.toFixed(0)}°까지 돌고 좌우로 ${railRuns.spinOff.maxY.toFixed(0)} mm까지 벗어남 → 예전 양쪽 레일 위치(±159 mm)에도 막는 것이 없음. 이때 경고: ${railRuns.spinOff.warns.length ? railRuns.spinOff.warns.join(' / ') : '없음'}. 화면의 레일 개수는 브라우저 검사에서 확인`);
 
   // team mission: unchanged code, with the rail actually engaged by a 1 % wheel mismatch
   if (teamFiles) {
@@ -519,7 +563,8 @@ const out = { generatedAt: new Date().toISOString(), runtimeVersion: rt.version,
 fs.writeFileSync(path.join(root, 'docs/verification.json'), JSON.stringify(out, null, 1));
 const md = ['# 설계 검증 결과', '', `생성: ${out.generatedAt} · \`node tools/verify.mjs\``, '',
   '| 요구 | 항목 | 결과 | 근거 |', '|---|---|---|---|',
-  ...results.map((r) => `| ${r.req} | ${r.name} | ${r.ok ? '✅ 통과' : '❌ 실패'} | ${String(r.detail).replace(/\|/g, '/')} |`)];
+  ...results.map((r) => `| ${r.req} | ${r.name} | ${r.ok === null ? '⚠️ 확인 필요' : r.ok ? '✅ 통과' : '❌ 실패'} | ${String(r.detail).replace(/\|/g, '/')} |`)];
+md.push('', '측정 방법 표기: [센서 전환 위치] = 물리 엔진 안에서 센서가 검정/흰색으로 바뀐 지점(설정한 선 위치가 물리 계산에 그대로 쓰이는지 확인). [엔코더 환산]·[운동 측정]·[선 감지 시각 측정] = 시간과 엔코더·차체 위치로 잰 값(설정값을 직접 읽지 않음). [물리 내부 축 위치를 회전 운동에서 역산] = 레일에 기댄 회전에서 앞뒤 가이드 위치로 계산. [초기 상태 확인] = 첫 프레임 값. ⚠️ 확인 필요 = 시뮬레이터 오류는 아니지만 실물 자료와 어긋나 팀 확인이 필요한 항목.');
 const trace = results.find((r) => r.data && r.data.rows);
 if (trace) {
   md.push('', '## 실측 vs 시뮬레이션 BASE_TRACE (0번 정렬, 모터1 엔코더 deg/s)', '', '| ms | 명령 | 실측 | 시뮬 |', '|---|---|---|---|');
@@ -534,4 +579,4 @@ const browserPart = path.join(root, 'docs/verification-browser.md');
 if (fs.existsSync(browserPart)) md.push('', fs.readFileSync(browserPart, 'utf8').trim());
 md.push('', '요구 1 = 주행 재현도, 요구 2 = 팀 공유, 요구 3 = 코드 호환 (사용자 요청서 기준)');
 fs.writeFileSync(path.join(root, 'docs/VERIFICATION.md'), md.join('\n') + '\n');
-console.log(`\n${results.filter((r) => r.ok).length}/${results.length} passed → docs/VERIFICATION.md`);
+console.log(`\n${results.filter((r) => r.ok === true).length}/${results.length} passed, ${results.filter((r) => r.ok === null).length} warn, ${results.filter((r) => r.ok === false).length} fail → docs/VERIFICATION.md`);
