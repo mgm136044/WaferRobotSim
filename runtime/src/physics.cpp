@@ -155,7 +155,7 @@ static void load_params() {
   if (prm.line_count < 1) prm.line_count = 1;
   if (prm.line_count > 16) prm.line_count = 16;
   prm.line_width = P("field.lineWidthMm", 10);
-  double first = P("field.firstGapMm", 150), gap = P("field.gapMm", 470), last = P("field.lastGapMm", 150);
+  double first = P("field.firstGapMm", 163), gap = P("field.gapMm", 360), last = P("field.lastGapMm", 163);
   for (int i = 0; i < prm.line_count; ++i)
     prm.line_center[i] = first + prm.line_width * 0.5 + i * (gap + prm.line_width);
   prm.track_len_mm = first + prm.line_count * prm.line_width + (prm.line_count - 1) * gap + last;
