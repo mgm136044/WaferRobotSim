@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareBuild, toTree } from '../web/js/sketch-build.js';
 import { runSketch, F, FRAME_SIZE } from '../web/js/sim-host.js';
-import { defaultParams, fieldGeometry } from '../web/js/params.js';
+import { defaultParams, fieldGeometry, resolveParams } from '../web/js/params.js';
 import { analyseRun } from '../web/js/analysis.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -70,11 +70,11 @@ const res = await runSketch(wasm, {
 });
 console.log(`\nrun ended: code=${res.code} t=${(res.t / 1000).toFixed(3)}s reason=${res.reason}${res.message ? ' msg=' + res.message : ''}`);
 console.log(`simulated ${frames.length} frames in ${((Date.now() - t1) / 1000).toFixed(1)} s wall`);
-const report = analyseRun(frames, serial, events, params);
+const report = analyseRun(frames, serial, events, resolveParams(params));
 console.log(JSON.stringify(report.summary, null, 1));
-for (const s of report.stops) console.log(`stop @${(s.t / 1000).toFixed(2)}s line~${s.nearestLine} axle=${s.axle.toFixed(1)}mm s5err=${s.sensorErr[1]?.toFixed(1)} s4err=${s.sensorErr[0]?.toFixed(1)} dur=${s.duration}ms`);
+for (const s of report.stops) console.log(`stop @${(s.t / 1000).toFixed(2)}s line~${s.nearestLine} axle=${s.axle.toFixed(1)}mm s5err=${s.sensorErr[1]?.toFixed(1)} s4err=${s.sensorErr[0]?.toFixed(1)} front=${s.frontGap.toFixed(1)} rear=${s.rearGap.toFixed(1)} dur=${s.duration}ms`);
 if (csv) {
-  const head = ['t', 'x', 'v', 'cmd1', 'w1', 'w2', 'mode1', 'sA', 'sB', 'z', 'j1', 'j2', 'wrist'];
+  const head = ['t', 'x', 'v', 'cmd1', 'w1', 'w2', 'mode1', 'sA', 'sB', 'z', 'j1', 'j2', 'wrist', 'y', 'yaw', 'railF', 'guideF', 'guideR'];
   const lines = [head.join(',')];
   for (const f of frames) lines.push(head.map((k) => f[F[k]]).join(','));
   fs.writeFileSync(csv, lines.join('\n'));

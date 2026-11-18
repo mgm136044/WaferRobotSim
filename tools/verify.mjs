@@ -12,13 +12,13 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { prepareBuild, toTree, locateSketch } from '../web/js/sketch-build.js';
 import { runSketch, F, FRAME_SIZE } from '../web/js/sim-host.js';
-import { defaultParams, fieldGeometry, applyFieldPreset, FIELD_PRESETS } from '../web/js/params.js';
+import { defaultParams, fieldGeometry, applyFieldPreset, FIELD_PRESETS, robotGeometry, resolveParams } from '../web/js/params.js';
 import { analyseRun } from '../web/js/analysis.js';
 import { readZip, decodeText } from '../web/js/zip.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
-const zipPath = arg('--zip'), realLogPath = arg('--real-log'), prizmLib = arg('--prizm-lib');
+const zipPath = arg('--zip'), realLogPath = arg('--real-log'), prizmLib = arg('--prizm-lib'), beforePath = arg('--before');
 const rt = JSON.parse(fs.readFileSync(path.join(root, 'web/rt/runtime.json'), 'utf8'));
 const rtObjects = {};
 for (const o of rt.objects) rtObjects[o] = fs.readFileSync(path.join(root, 'web/rt/obj', o));
@@ -83,7 +83,7 @@ if (zipPath) {
     const params = defaultParams();
     const t1 = Date.now();
     mission = await run(c.wasm, params);
-    const a = analyseRun(mission.frames, mission.serial, mission.events, params);
+    const a = analyseRun(mission.frames, mission.serial, mission.events, resolveParams(params));
     mission.analysis = a;
     const text = mission.serial.map((s) => s.text).join('');
     const faults = (text.match(/^.*(FAULT|ABORT|REJECT|FAILED).*$/gm) || []).filter((l) => !/ServoOff FAIL/.test(l));
@@ -112,9 +112,9 @@ if (realLogPath && mission) {
   const rows = [];
   for (let i = 0; i < n; i++) { se += (real[i].e1 - sim[i].e1) ** 2; rows.push([real[i].ms, real[i].cmd, real[i].e1, sim[i].e1]); }
   const rms = Math.sqrt(se / n);
-  const ss = (arr) => { const tail = arr.slice(-8); return tail.reduce((a, r) => a + r.e1, 0) / tail.length; };
+  const ss = (arr) => { const tail = arr.filter((r) => r.ms >= 500); return tail.reduce((a, r) => a + r.e1, 0) / tail.length; };
   check('1', '실측 BASE_TRACE 재현 (0번 정렬, 명령 100 deg/s)', rms < 5,
-    `샘플 ${n}개 RMS 차이 ${rms.toFixed(1)} deg/s, 정상상태 실측 ${ss(real).toFixed(1)} / 시뮬 ${ss(sim).toFixed(1)} deg/s`, { rows });
+    `샘플 ${n}개 RMS 차이 ${rms.toFixed(1)} deg/s, 0.5초 이후 평균 실측 ${ss(real).toFixed(1)} / 시뮬 ${ss(sim).toFixed(1)} deg/s. 정렬 시간 실측 ${real.length ? (real[real.length - 1].ms / 1000 + 0.05).toFixed(2) : '?'} s / 시뮬 ${sim.length ? (sim[sim.length - 1].ms / 1000 + 0.05).toFixed(2) : '?'} s (시작 위치·축간 거리에 따라 다름)`, { rows });
 }
 
 // 1b-1e. physics consistency with a probe sketch
@@ -164,9 +164,9 @@ void loop() {}
   // encoder vs chassis displacement (no slip at constant speed)
   const tA = 2600, tB = 3400;
   const fA = frameAt(r1.frames, tA), fB = frameAt(r1.frames, tB);
-  const C = Number(params['drive.mmPerRev']);
+  const C = robotGeometry(params).mmPerRev;
   const dxEnc = (fB[F.enc1] - fA[F.enc1]) / 1440 * C, dx = fB[F.x] - fA[F.x];
-  check('1', '엔코더 ↔ 차체 이동 일치 (등속, 미끄럼 없음)', Math.abs(dxEnc - dx) / dx < 0.01, `엔코더 환산 ${dxEnc.toFixed(1)} mm / 차체 ${dx.toFixed(1)} mm (C=${C} mm/rev)`);
+  check('1', '엔코더 ↔ 차체 이동 일치 (등속, 미끄럼 없음)', Math.abs(dxEnc - dx) / dx < 0.01, `엔코더 환산 ${dxEnc.toFixed(1)} mm / 차체 ${dx.toFixed(1)} mm (모터 1회전 ${C.toFixed(2)} mm)`);
   const stopDist = (mark) => {
     const t = serialT(r1.serial, mark);
     const f0 = frameAt(r1.frames, t);
@@ -179,6 +179,7 @@ void loop() {}
   const mu = Number(params['robot.tireMu']), frac = Number(params['robot.driveWeightFrac']), M = Number(params['robot.massKg']);
   // fastest physically possible stop: drive wheels skidding (mu*N) + rolling/guide resistance
   const aMax = (mu * 9.81 * frac * M + Number(params['robot.rollResistN']) + Number(params['robot.rollViscous']) * Math.abs(br.v0) / 1000) / M * 1000;
+  // (the centre-rail rollers add no drag here: symmetric wheels never touch the rail)
   const dExpect = (br.v0 * br.v0) / (2 * aMax);
   check('1', '브레이크(125) 정지거리 물리 일관성', Math.abs(br.d - dExpect) / dExpect < 0.15 && br.d < co.d,
     `${br.v0.toFixed(0)} mm/s에서 ${br.d.toFixed(1)} mm/${br.dt.toFixed(0)} ms — 바퀴 미끄럼 한계 계산값 ${dExpect.toFixed(1)} mm와 일치, 코스트(파워 0) ${co.d.toFixed(1)} mm/${co.dt.toFixed(0)} ms보다 짧음`);
@@ -312,13 +313,186 @@ class Adafruit_NeoPixel { public:
   const pr = applyFieldPreset(defaultParams(), 'rules');
   const g = fieldGeometry(pr);
   check('1', '규정 V1.3 경기장 프리셋', g.pitch === 370 && Math.abs(g.length - 1860) < 0.01 && g.startZone === 500,
-    `선 간격 ${g.pitch} mm, 전장 ${g.length} mm, 시작구역 ${g.startZone} mm (레일 간격 288·폭 30은 3D에 반영)`);
+    `선 간격 ${g.pitch} mm, 전장 ${g.length} mm, 시작구역 ${g.startZone} mm`);
   const gm = fieldGeometry(defaultParams());
-  check('1', '팀 실측 경기장 프리셋 (기본값)', gm.pitch === 480 && gm.width === 10 && gm.lines[0] === 155,
-    `흰 칸 470 + 선 10 → 피치 ${gm.pitch} mm, 0번 선 중심 ${gm.lines[0]} mm, 전장 ${gm.length} mm`);
+  check('1', '실측 경기장 (기본값)', gm.pitch === 480 && gm.width === 10 && gm.lines[0] === 155,
+    `라인 사이 470 + 선 10 → 선 중심 간격 ${gm.pitch} mm, 0번 선 중심 ${gm.lines[0]} mm, 전장 ${gm.length} mm`);
 }
 
-const out = { generatedAt: new Date().toISOString(), runtimeVersion: rt.version, results };
+// ============================================================ measured geometry + centre rail (2026-11-19 change)
+const measured = {};
+{
+  const params = defaultParams();
+  const rg = robotGeometry(params);
+  const geo = fieldGeometry(params);
+  // slow pass over the whole field: every sensor transition is a measurement in the simulator
+  const SWEEP = `#include <PRIZM_PRO.h>
+PRIZM prizm;
+void setup() {
+  Serial.begin(115200);
+  prizm.PrizmBegin();
+  prizm.resetEncoders();
+  prizm.setMotorSpeeds(100, -100);
+  while (millis() < 70000) { delay(5); }
+  prizm.setMotorPowers(125, 125);
+  delay(500);
+  Serial.println("END");
+}
+void loop() {}
+`;
+  const c = await compile({ 'Sweep/Sweep.ino': SWEEP });
+  const r = await run(c.wasm, params);
+  const fr = r.frames;
+  const xAt = (t, key = F.x) => { // linear interpolation between 5 ms frames
+    let i = fr.findIndex((f) => f[F.t] >= t);
+    if (i <= 0) return fr[Math.max(0, i)][key];
+    const a = fr[i - 1], b = fr[i], w = (t - a[F.t]) / (b[F.t] - a[F.t]);
+    return a[key] + (b[key] - a[key]) * w;
+  };
+  const ev = (port) => r.events.filter((e) => e.type === 2 && e.a === port);
+  const blackLv = Number(params['sensor.blackLevel']);
+  const segs = (port) => { const out = []; let cur = null; for (const e of ev(port)) { if (e.b === blackLv) cur = { in: e.c, tin: e.t }; else if (cur) { out.push({ ...cur, out: e.c, tout: e.t }); cur = null; } } return out; };
+  const s4 = segs(rg.sensors[0].port), s5 = segs(rg.sensors[1].port);
+  // sensor 4 starts beyond line 0 and sensor 5 never reaches line 4: take each line from
+  // whichever sensor crossed it (both crossed lines 1-3 and must agree)
+  const byLine = geo.lines.map((c) => [...s5, ...s4].filter((q) => Math.abs((q.in + q.out) / 2 - c) < 100));
+  const lineSeg = byLine.map((list) => list[0]);
+  const agree = byLine.every((list) => list.every((q) => Math.abs(q.in - list[0].in) < 0.05 && Math.abs(q.out - list[0].out) < 0.05));
+  const widths = lineSeg.map((q) => q.out - q.in);
+  const gaps = lineSeg.slice(1).map((q, i) => q.in - lineSeg[i].out);
+  const centres = lineSeg.map((q) => (q.in + q.out) / 2);
+  const pitches = centres.slice(1).map((c, i) => c - centres[i]);
+  // the same gaps as the robot itself would measure them with its encoder (nominal 161.79 mm/rev)
+  const encMm = (t) => (xAt(t, F.enc1) / 1440) * rg.mmPerRev;
+  const encGaps = [s5, s4].flatMap((sg) => sg.slice(1).map((q, i) => encMm(q.tin) - encMm(sg[i].tout))); // same sensor, consecutive lines
+  const rng = (a) => `${Math.min(...a).toFixed(2)}~${Math.max(...a).toFixed(2)}`;
+  measured.field = { widths, gaps, pitches, encGaps, firstEdge: s5.length ? s5[0].in : null, lineCount: s4.length };
+  check('치수', '라인 간격 47cm (라인과 라인 사이 흰 구간)', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 470) < 0.05),
+    `센서가 실제로 선을 지나며 측정한 흰 구간 ${gaps.map((g) => g.toFixed(2)).join(' / ')} mm, 선 중심 간격 ${rng(pitches)} mm (두 센서 측정 일치=${agree}). 로봇 엔코더로 환산하면 ${rng(encGaps)} mm (바퀴 미끄럼 0.2% 포함)`);
+  check('치수', '검정 라인 폭 1cm', widths.length === 5 && widths.every((w) => Math.abs(w - 10) < 0.05),
+    `0~4번 선 검정 구간 폭 ${widths.map((w) => w.toFixed(2)).join(' / ')} mm, 시작 끝 → 0번 선 ${lineSeg[0].in.toFixed(2)} mm, 4번 선 → 끝 ${(geo.length - lineSeg[4].out).toFixed(2)} mm, 전장 ${geo.length} mm`);
+  // wheel diameter from encoder vs travel at constant speed. Run 1: no rolling resistance,
+  // so the tyre carries no load and does not creep -> pure rolling kinematics.
+  const tA = 15000, tB = 45000;
+  const wheelFrom = (rr) => {
+    const xa = (t, key = F.x) => { let i = rr.frames.findIndex((f) => f[F.t] >= t); const a = rr.frames[i - 1], b = rr.frames[i], w = (t - a[F.t]) / (b[F.t] - a[F.t]); return a[key] + (b[key] - a[key]) * w; };
+    const dX = xa(tB) - xa(tA), dCounts = xa(tB, F.enc1) - xa(tA, F.enc1);
+    const wheelRevs = dCounts / 1440 / rg.G;
+    return { dX, dCounts, wheelRevs, perRev: dX / wheelRevs, dMeas: dX / wheelRevs / Math.PI };
+  };
+  const rFree = await run(c.wasm, { ...params, 'robot.rollResistN': 0, 'robot.rollViscous': 0 });
+  const wFree = wheelFrom(rFree), wLoad = wheelFrom(r);
+  measured.wheel = { free: wFree, loaded: wLoad };
+  check('치수', '바퀴 지름 10.3cm (회전수 ↔ 이동거리)', Math.abs(wFree.dMeas - 103) < 0.01 && Math.abs(wLoad.dMeas - 103) < 0.5,
+    `${((tB - tA) / 1000)}초 등속 구간에서 차체 이동 ÷ (엔코더 회전 ÷ 기어 ${rg.G}): 미끄럼 없는 조건 ${wFree.dX.toFixed(2)} mm / 바퀴 ${wFree.wheelRevs.toFixed(4)}회전 → 1회전 ${wFree.perRev.toFixed(2)} mm, 지름 ${wFree.dMeas.toFixed(3)} mm. 기본 설정(구름 저항 있음)은 타이어 미끄럼 때문에 1회전 ${wLoad.perRev.toFixed(2)} mm (지름 환산 ${wLoad.dMeas.toFixed(2)} mm, −${((1 - wLoad.dMeas / 103) * 100).toFixed(2)}%)`);
+  // start position
+  const f0 = fr[0];
+  const rearAt0 = f0[F.x] + rg.rearEnd;
+  const firstMove = fr.find((f) => Math.abs(f[F.x] - f0[F.x]) > 0.01);
+  measured.start = { axle: f0[F.x], rear: rearAt0 };
+  check('치수', '시작 위치 27cm (시작 끝 → 모터축)', Math.abs(f0[F.x] - 270) < 0.01 && Math.abs(rearAt0) < 0.01,
+    `시뮬 시작 프레임: 모터축 ${f0[F.x].toFixed(2)} mm, 로봇 뒤끝 ${rearAt0.toFixed(2)} mm (= 시작 끝에 닿음), 첫 이동 ${firstMove ? (firstMove[F.t] / 1000).toFixed(3) + '초' : '없음'}`);
+  // sensor positions = where the sensor is when it switches on an edge, minus the axle position then
+  const sensMeas = rg.sensors.map((sn, i) => {
+    const e = ev(sn.port).filter((q) => q.b === blackLv);
+    const offs = e.map((q) => q.c - xAt(q.t));
+    const off = offs.reduce((a, b) => a + b, 0) / offs.length;
+    return { port: sn.port, axle: sn.axle, off, fromAxle: off - sn.axleS, fromWheelFront: off - sn.axleS - rg.r, n: offs.length, spread: Math.max(...offs) - Math.min(...offs) };
+  });
+  measured.sensors = sensMeas;
+  const nm = { front: '앞바퀴', rear: '뒷바퀴' };
+  check('치수', 'IR 센서 위치 (각 바퀴 앞끝에서 2cm)', sensMeas.every((m) => Math.abs(m.fromWheelFront - 20) < 0.05),
+    sensMeas.map((m) => `${m.port}번: ${nm[m.axle]}축 +${m.fromAxle.toFixed(2)} mm = 바퀴 앞끝 +${m.fromWheelFront.toFixed(2)} mm (검정 진입 ${m.n}회 평균, 모터축 기준 ${m.off >= 0 ? '+' : ''}${m.off.toFixed(2)} mm)`).join(' · '));
+
+  // centre rail: same disturbances with the rail on and off
+  const DIST = {
+    'Mismatch/Mismatch.ino': `#include <PRIZM_PRO.h>
+PRIZM prizm;
+void setup() { prizm.PrizmBegin(); prizm.setMotorSpeeds(720, -720); delay(6000); prizm.setMotorPowers(125, 125); delay(1000); }
+void loop() {}
+`,
+    'OneMotor/OneMotor.ino': `#include <PRIZM_PRO.h>
+PRIZM prizm;
+void setup() { prizm.PrizmBegin(); prizm.setMotorPower(2, 0); prizm.setMotorSpeed(1, 400); delay(5000); prizm.setMotorPowers(125, 125); delay(1000); }
+void loop() {}
+` };
+  const railRuns = {};
+  for (const [file, extra] of [['Mismatch/Mismatch.ino', { 'drive.rightWheelScale': 1.03 }], ['OneMotor/OneMotor.ino', {}]]) {
+    const cc = await compile({ [file]: DIST[file] });
+    for (const on of [1, 0]) {
+      const pr = { ...defaultParams(), ...extra, 'rail.enabled': on };
+      const rr = await run(cc.wasm, pr);
+      const a = analyseRun(rr.frames, rr.serial, rr.events, resolveParams(pr));
+      railRuns[`${file.split('/')[0]}-${on}`] = { guide: a.summary.maxGuideOffsetMm, yaw: a.summary.maxYawDeg, force: a.summary.maxRailForceN, endY: rr.frames[rr.frames.length - 1][F.y] };
+    }
+  }
+  measured.rail = railRuns;
+  const clr = Number(params['rail.clearanceMm']);
+  const okOn = railRuns['Mismatch-1'].guide < clr + 0.3 && railRuns['OneMotor-1'].guide < clr + 0.3;
+  const okOff = railRuns['Mismatch-0'].guide > 20 && railRuns['OneMotor-0'].guide > 20;
+  check('레일', '가운데 레일이 좌우 이탈을 잡음 (구속·접촉)', okOn && okOff,
+    `좌우 바퀴 지름 3% 차이로 720 deg/s 주행: 레일 있음 → 가이드 편차 최대 ${railRuns['Mismatch-1'].guide.toFixed(2)} mm(틈새 ${clr} mm)·회전 ${railRuns['Mismatch-1'].yaw.toFixed(2)}°·접촉력 최대 ${railRuns['Mismatch-1'].force.toFixed(1)} N / 레일 끔 → ${railRuns['Mismatch-0'].guide.toFixed(1)} mm·${railRuns['Mismatch-0'].yaw.toFixed(2)}°. ` +
+    `한쪽 모터만 구동: 레일 있음 ${railRuns['OneMotor-1'].guide.toFixed(2)} mm·${railRuns['OneMotor-1'].yaw.toFixed(2)}°·${railRuns['OneMotor-1'].force.toFixed(1)} N / 레일 끔 ${railRuns['OneMotor-0'].guide.toFixed(1)} mm·${railRuns['OneMotor-0'].yaw.toFixed(1)}°`);
+  check('레일', '양쪽 레일 구속이 물리에서 사라짐', okOff,
+    `레일을 끄면 아무것도 옆을 잡지 않음: ${railRuns['OneMotor-0'].guide.toFixed(1)} mm까지 밀려남 (예전 양쪽 레일 위치 ±159 mm 안쪽의 벽·구속 없음). 화면의 레일 개수는 브라우저 검사에서 확인`);
+
+  // team mission: unchanged code, with the rail actually engaged by a 1 % wheel mismatch
+  if (teamFiles) {
+    const cc = await compile(teamFiles);
+    const pr = { ...defaultParams(), 'drive.rightWheelScale': 1.01 };
+    const rr = await run(cc.wasm, pr);
+    const a = analyseRun(rr.frames, rr.serial, rr.events, resolveParams(pr));
+    const txt = rr.serial.map((q) => q.text).join('');
+    measured.missionMismatch = a.summary;
+    check('레일', '팀 코드 미션 중 레일 안내 (좌우 바퀴 1% 차이)', /MISSION_DONE/.test(txt) && a.summary.stopLines === mission.analysis.summary.stopLines && a.summary.maxGuideOffsetMm < clr + 0.3,
+      `정지 순서 ${a.summary.stopLines} (차이 없을 때와 동일), 가이드 편차 최대 ${a.summary.maxGuideOffsetMm.toFixed(2)} mm, 접촉력 최대 ${a.summary.maxRailForceN.toFixed(1)} N, 회전 최대 ${a.summary.maxYawDeg.toFixed(2)}°, 미션 ${a.summary.missionSeconds} s`);
+  }
+}
+
+// ============================================================ before / after comparison
+let comparison = null;
+if (beforePath && mission && fs.existsSync(beforePath)) {
+  const B = JSON.parse(fs.readFileSync(beforePath, 'utf8'));
+  const A = mission;
+  const aS = A.analysis;
+  const tOf = (serial, re) => { const q = serial.find((l) => re.test(l.text)); return q ? q.t : null; };
+  const bFrames = B.frames, aFrames = A.frames;
+  const xAtB = (t) => bFrames.reduce((b, f) => (Math.abs(f.t - t) < Math.abs(b.t - t) ? f : b), bFrames[0]).x;
+  const alignB = { d: B.stops[0].axle - bFrames[0].x, t: (tOf(B.serial, /BASE_DONE line=0/) - tOf(B.serial, /BASE_SEEK_ZERO/)) / 1000 };
+  const alignA = { d: aS.stops[0].axle - aFrames[0][F.x], t: (tOf(A.serial, /BASE_DONE line=0/) - tOf(A.serial, /BASE_SEEK_ZERO/)) / 1000 };
+  // first black of each sensor per line during the scoring run (line detection timing)
+  const firstBlack = (events, port, lines, wid) => lines.map((c) => { const e = events.find((q) => q.type === 2 && q.a === port && q.b === 1 && Math.abs(q.c - (c - wid / 2)) < 0.6); return e ? e.t : null; });
+  const geo = fieldGeometry(defaultParams());
+  const fbA4 = firstBlack(A.events, 4, geo.lines, geo.width), fbB4 = firstBlack(B.events, 4, geo.lines, geo.width);
+  const fbA5 = firstBlack(A.events, 5, geo.lines, geo.width), fbB5 = firstBlack(B.events, 5, geo.lines, geo.width);
+  const bCm = B.params['drive.mmPerRev'] ?? 153.2;
+  const rgA = robotGeometry(defaultParams());
+  comparison = {
+    rows: [
+      ['모터 1회전당 이동', `${bCm} mm`, `${rgA.mmPerRev.toFixed(2)} mm`],
+      ['720 deg/s 명령 최고 속도', `${B.summary.maxSpeedMmS} mm/s`, `${aS.summary.maxSpeedMmS} mm/s`],
+      ['선 중심 간격 480 mm = 모터 회전각', `${(480 / bCm * 360).toFixed(0)}°`, `${(480 / rgA.mmPerRev * 360).toFixed(0)}°`],
+      ['시작 위치 (구동축/모터축)', `${bFrames[0].x} mm (뒤끝 ${bFrames[0].x - (B.params['robot.rearOverhangMm'] ?? 70)} mm)`, `${aFrames[0][F.x]} mm (뒤끝 0 mm)`],
+      ['센서 위치 (구동축/모터축 기준)', `4번 +${B.params['sensor.0.offsetMm']} · 5번 +${B.params['sensor.1.offsetMm']} mm`, `4번 +${rgA.sensors[0].s} · 5번 ${rgA.sensors[1].s} mm`],
+      ['0번 정렬 (5번 센서가 0번 선까지)', `${alignB.d.toFixed(1)} mm 이동, ${alignB.t.toFixed(2)} s`, `${alignA.d.toFixed(1)} mm 이동, ${alignA.t.toFixed(2)} s`],
+      ['첫 움직임', `${B.summary.firstMotionS} s`, `${aS.summary.firstMotionS} s`],
+      ['정지 순서', B.summary.stopLines, aS.summary.stopLines],
+      ['MISSION_DONE', `${(tOf(B.serial, /MISSION_DONE/) / 1000).toFixed(2)} s`, `${(tOf(A.serial, /MISSION_DONE/) / 1000).toFixed(2)} s`],
+      ['미션 시간 (첫 움직임~LED 3회)', `${B.summary.missionSeconds} s`, `${aS.summary.missionSeconds} s`],
+      ['끝 벽 접촉', `${B.summary.collisions}회`, `${aS.summary.collisions}회`],
+      ['라인 점수(참고)', `${B.summary.lineScoreEstimate}`, `${aS.summary.lineScoreEstimate}`],
+    ],
+    stops: aS.stops.map((sa, i) => {
+      const sb = B.stops[i] || {};
+      return [`${i + 1}. ${sa.nearestLine}번`, sb.sensorErr ? `5번 ${sb.sensorErr[1].toFixed(1)} / 4번 ${sb.sensorErr[0].toFixed(1)}` : '-', `5번 ${sa.sensorErr[1].toFixed(1)} / 4번 ${sa.sensorErr[0].toFixed(1)}`,
+        sb.t ? (sb.t / 1000).toFixed(2) : '-', (sa.t / 1000).toFixed(2), `${sa.frontGap.toFixed(1)} / ${sa.rearGap.toFixed(1)}`];
+    }),
+    detect: geo.lines.map((c, i) => [`${i}번 선`, fbB4[i] ? (fbB4[i] / 1000).toFixed(3) : '-', fbA4[i] ? (fbA4[i] / 1000).toFixed(3) : '-', fbB5[i] ? (fbB5[i] / 1000).toFixed(3) : '-', fbA5[i] ? (fbA5[i] / 1000).toFixed(3) : '-']),
+  };
+  check('비교', '수정 전후 주행 결과 비교', true, `정지 순서 ${B.summary.stopLines === aS.summary.stopLines ? '같음' : '다름'}, 미션 ${B.summary.missionSeconds} → ${aS.summary.missionSeconds} s, 최고 속도 ${B.summary.maxSpeedMmS} → ${aS.summary.maxSpeedMmS} mm/s, 끝 벽 접촉 ${B.summary.collisions} → ${aS.summary.collisions}회 (표 참조)`);
+}
+
+const out = { generatedAt: new Date().toISOString(), runtimeVersion: rt.version, results, measured, comparison };
 fs.writeFileSync(path.join(root, 'docs/verification.json'), JSON.stringify(out, null, 1));
 const md = ['# 설계 검증 결과', '', `생성: ${out.generatedAt} · \`node tools/verify.mjs\``, '',
   '| 요구 | 항목 | 결과 | 근거 |', '|---|---|---|---|',
@@ -327,6 +501,11 @@ const trace = results.find((r) => r.data && r.data.rows);
 if (trace) {
   md.push('', '## 실측 vs 시뮬레이션 BASE_TRACE (0번 정렬, 모터1 엔코더 deg/s)', '', '| ms | 명령 | 실측 | 시뮬 |', '|---|---|---|---|');
   for (const [ms, cmd, re, si] of trace.data.rows) md.push(`| ${ms} | ${cmd} | ${re} | ${si} |`);
+}
+if (comparison) {
+  md.push('', '## 수정 전후 비교 (원본 코드 무수정, 기본 설정)', '', '| 항목 | 수정 전 | 수정 후 |', '|---|---|---|', ...comparison.rows.map((r) => `| ${r.join(' | ')} |`));
+  md.push('', '### 정지 위치 (선 중심 기준 센서 오차 mm, + = 선을 지나침)', '', '| 정지 | 수정 전 | 수정 후 | 전 시각 s | 후 시각 s | 후 앞끝/뒤끝 여유 mm |', '|---|---|---|---|---|---|', ...comparison.stops.map((r) => `| ${r.join(' | ')} |`));
+  md.push('', '### 라인 처음 감지 시각 (s)', '', '| 선 | 4번 전 | 4번 후 | 5번 전 | 5번 후 |', '|---|---|---|---|---|', ...comparison.detect.map((r) => `| ${r.join(' | ')} |`));
 }
 const browserPart = path.join(root, 'docs/verification-browser.md');
 if (fs.existsSync(browserPart)) md.push('', fs.readFileSync(browserPart, 'utf8').trim());
