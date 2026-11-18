@@ -24,7 +24,7 @@ struct Params {
   // chassis (s = position along the robot from the MOTOR axle, forward +; l = left +)
   double mass, yaw_inertia, drive_frac, mu, tire_k, roll_force, roll_visc, passive_grip;
   double length_mm, rear_overhang_mm;
-  double passive_s, front_axle_s, rear_axle_s, track, right_scale;
+  double passive_s, front_axle_s, rear_axle_s, track, right_scale, width_mm, cg_s, work_half_w;
   int m1_sign, m2_sign;
   // centre rail
   int rail_on;
@@ -37,7 +37,7 @@ struct Params {
   int sensor_count;
   int sensor_port[6];
   double sensor_offset[6];
-  double sensor_margin, sensor_latency_s;
+  double sensor_margin, sensor_latency_s, sensor_l_mm;
   int black_level;
   // start
   double start_axle_mm;
@@ -92,9 +92,12 @@ static bool dc_enabled = false;
 static uint8_t dc_read_reg = 0;
 static double R_ohm, Kt, Ke, tau_f;
 
-// motor-axle centre: x along the track (m), y sideways from the rail centre line (m, left +),
-// psi yaw (rad, CCW seen from above); world velocities vx (= v_ms), vy and yaw rate r_yaw
-static double x_m = 0, v_ms = 0, y_m = 0, vy_ms = 0, psi = 0, r_yaw = 0;
+// motor-axle centre (reference point): x along the track (m), y sideways from the rail centre
+// line (m, left +), psi yaw (rad, CCW seen from above); its world velocity (v_ms, vy_ms).
+// The rigid body is integrated at its centre of mass (s = cg_s on the robot axis): world
+// velocity (vcx, vcy) and yaw rate r_yaw.
+static double x_m = 0, v_ms = 0, y_m = 0, vy_ms = 0, psi = 0, r_yaw = 0, vcx = 0, vcy = 0;
+static bool lateral_reported = false, offrail_reported = false;
 static double rail_force = 0, guide_off[2] = {0, 0};
 static double slip[2] = {0, 0};
 static int collision = 0;
@@ -136,6 +139,9 @@ static void load_params() {
   prm.front_axle_s = P("geom.frontAxleS", 0) / 1000.0;
   prm.rear_axle_s = P("geom.rearAxleS", -224) / 1000.0;
   prm.track = P("robot.trackMm", 320) / 1000.0;
+  prm.width_mm = P("robot.widthMm", 400);
+  prm.cg_s = P("geom.cgS", -100.8) / 1000.0;
+  prm.work_half_w = P("field.workWidthMm", 900) / 2.0;
   prm.right_scale = P("drive.rightWheelScale", 1.0);
   prm.rail_on = P("rail.enabled", 1) != 0;
   prm.rail_clear = P("rail.clearanceMm", 1.0) / 1000.0;
@@ -166,8 +172,9 @@ static void load_params() {
   }
   prm.sensor_margin = P("sensor.marginMm", 0);
   prm.sensor_latency_s = P("sensor.latencyMs", 0.3) / 1000.0;
+  prm.sensor_l_mm = P("sensor.lateralMm", 50);
   prm.black_level = P("sensor.blackLevel", 1) ? 1 : 0;
-  prm.start_axle_mm = P("robot.startAxleMm", 270);
+  prm.start_axle_mm = P("geom.startAxleMm", 270);
 
   prm.z_initial = P("z.initialMm", -30);
   prm.z_top_stop = P("z.topStopMm", 3);
@@ -206,7 +213,8 @@ void world_init() {
   motors[0].driven = true; motors[0].sign = prm.m1_sign;
   motors[1].driven = true; motors[1].sign = prm.m2_sign;
   x_m = prm.start_axle_mm / 1000.0;
-  rail_overload_reported = false;
+  rail_overload_reported = false; lateral_reported = false; offrail_reported = false;
+  vcx = vcy = 0;
   v_ms = 0; y_m = 0; vy_ms = 0; psi = 0; r_yaw = 0; rail_force = 0; guide_off[0] = guide_off[1] = 0;
   z_steps = prm.z_initial * prm.z_pulses_per_mm;
   for (int i = 0; i < 6; ++i) { sensor_level_cache[i] = -1; sensor_black_cache[i] = false; }
@@ -226,16 +234,17 @@ static int sensor_pin_for_port(int port) {
 
 static void update_sensors() {
   const double x_mm = (x_m - v_ms * prm.sensor_latency_s) * 1000.0;
-  const double cpsi = cos(psi);
+  const double cpsi = cos(psi), spsi = sin(psi);
+  const double lat = -prm.sensor_l_mm * spsi;  // sensors sit beside the rail (left +)
   for (int i = 0; i < prm.sensor_count; ++i) {
-    const bool b = black_at(x_mm + prm.sensor_offset[i] * cpsi);
+    const bool b = black_at(x_mm + prm.sensor_offset[i] * cpsi + lat);
     const int lv = b ? prm.black_level : !prm.black_level;
     if (lv != sensor_level_cache[i]) {
       const bool first = sensor_level_cache[i] < 0;
       sensor_level_cache[i] = lv;
       sensor_black_cache[i] = b;
       if (!first) {
-        event(EV_SENSOR, prm.sensor_port[i], lv, x_mm + prm.sensor_offset[i] * cpsi, b ? "black" : "white");
+        event(EV_SENSOR, prm.sensor_port[i], lv, x_mm + prm.sensor_offset[i] * cpsi + lat, b ? "black" : "white");
         gpio_input_changed(sensor_pin_for_port(prm.sensor_port[i]));
       }
     }
@@ -344,11 +353,13 @@ void world_step(double dt) {
   double tau[4];
   for (int i = 0; i < 4; ++i) tau[i] = motor_torque(motors[i], dt);
 
-  // body-frame velocities of the motor-axle centre
+  // body-frame velocities: u forward (same for every body point), vbc sideways at the centre
+  // of mass, vb sideways at the motor-axle centre (v_ref = v_cg - w x r_cg)
   const double c = cos(psi), sn = sin(psi);
-  double u = v_ms * c + vy_ms * sn;     // forward
-  double vb = -v_ms * sn + vy_ms * c;   // to the left
-  double Fx = 0, Fy = 0, Mz = 0;        // body-frame force sum (excl. rolling resistance) and yaw moment
+  double u = vcx * c + vcy * sn;
+  double vbc = -vcx * sn + vcy * c;
+  const double vb = vbc - r_yaw * prm.cg_s;
+  double Fx = 0, Fy = 0, Mz = 0;        // body-frame force sum (excl. rolling resistance), yaw moment about the CoM
 
   // driven wheels at s = 0: motor1 = right (l = -track/2), motor2 = left (l = +track/2)
   double F[2] = {0, 0};
@@ -364,30 +375,32 @@ void world_step(double dt) {
     clamp_circle(fx, fy, prm.mu * N);
     F[k] = fx;
     slip[k] = (surf - contact) * 1000.0;
-    Fx += fx; Fy += fy; Mz += -l * fx;
+    Fx += fx; Fy += fy; Mz += (0.0 - prm.cg_s) * fy - l * fx;
   }
   for (int k = 0; k < 4; ++k) {
     const double rk = r * (k == 0 ? prm.right_scale : 1.0);
     const double load = (k < 2) ? motors[k].sign * F[k] * rk : 0.0;
     integrate_shaft(motors[k], tau[k], load, dt);
   }
-  // passive axle (omni wheels by default): only a weak sideways force, rolls freely forward
+  // passive axle (omni wheels by default): the side rollers give only a weak, low-limit
+  // sideways force; the wheel rolls freely forward
   {
     const double Np = prm.mass * g * (1.0 - prm.drive_frac) / 2.0;
     for (int k = 0; k < 2; ++k) {
       double fx = 0, fy = -prm.tire_k * prm.passive_grip * (vb + r_yaw * prm.passive_s);
-      clamp_circle(fx, fy, prm.mu * Np);
-      Fy += fy; Mz += prm.passive_s * fy;
+      clamp_circle(fx, fy, prm.passive_grip * prm.mu * Np);
+      Fy += fy; Mz += (prm.passive_s - prm.cg_s) * fy;
     }
   }
   // centre rail: guide rollers at the front and rear axle straddle the rail with a small
   // clearance; beyond it a stiff spring-damper contact pushes the robot back (no pulling)
   rail_force = 0;
+  const double vref_y = vcy + r_yaw * prm.cg_s * c * -1.0;  // world sideways velocity of the motor axle
   const double guide_s[2] = {prm.front_axle_s, prm.rear_axle_s};
   for (int k = 0; k < 2; ++k) {
     const double s_g = guide_s[k];
     const double yg = y_m + s_g * sn;
-    const double vyg = vy_ms + r_yaw * s_g * c;
+    const double vyg = vref_y + r_yaw * s_g * c;
     guide_off[k] = yg * 1000.0;
     const double pen = fabs(yg) - prm.rail_clear;
     if (!prm.rail_on || pen <= 0) continue;
@@ -397,7 +410,7 @@ void world_step(double dt) {
     const double fyw = -sgn(yg) * fn;
     const double fxw = fabs(v_ms) > 1e-6 ? -prm.rail_mu * fn * sgn(v_ms) : 0.0;
     const double fxb = fxw * c + fyw * sn, fyb = -fxw * sn + fyw * c;
-    Fx += fxb; Fy += fyb; Mz += s_g * fyb;
+    Fx += fxb; Fy += fyb; Mz += (s_g - prm.cg_s) * fyb;
   }
 
   // forward motion (same Coulomb/viscous rolling resistance with stiction as before)
@@ -405,17 +418,20 @@ void world_step(double dt) {
     u = 0;
   } else {
     const double fr = prm.roll_force * (fabs(u) < 1e-5 ? sgn(Fx) : sgn(u)) + prm.roll_visc * u;
-    const double u_new = u + ((Fx - fr) / prm.mass + r_yaw * vb) * dt;
+    const double u_new = u + ((Fx - fr) / prm.mass + r_yaw * vbc) * dt;
     if (u != 0 && sgn(u_new) != sgn(u) && fabs(Fx) <= prm.roll_force) u = 0;
     else u = u_new;
   }
-  // sideways and yaw
-  vb += (Fy / prm.mass - r_yaw * u) * dt;
+  // sideways and yaw (at the centre of mass)
+  vbc += (Fy / prm.mass - r_yaw * u) * dt;
   r_yaw += Mz / prm.yaw_inertia * dt;
   psi += r_yaw * dt;
-  const double c2 = cos(psi), s2 = sin(psi);
-  v_ms = u * c2 - vb * s2;
-  vy_ms = u * s2 + vb * c2;
+  double c2 = cos(psi), s2 = sin(psi);
+  vcx = u * c2 - vbc * s2;
+  vcy = u * s2 + vbc * c2;
+  const double vbr = vbc - r_yaw * prm.cg_s;  // motor-axle sideways velocity
+  v_ms = u * c2 - vbr * s2;
+  vy_ms = u * s2 + vbr * c2;
   x_m += v_ms * dt;
   y_m += vy_ms * dt;
   if (!rail_overload_reported && prm.rail_on && rail_force > 0 &&
@@ -423,27 +439,46 @@ void world_step(double dt) {
     eventf(EV_WARN, 0, guide_off[0], guide_off[1], "centre rail guide pushed %.1f mm past its clearance", fmax(fabs(guide_off[0]), fabs(guide_off[1])) - prm.rail_clear * 1000.0);
     rail_overload_reported = true;
   }
+  if (!prm.rail_on && !offrail_reported && fmax(fabs(guide_off[0]), fabs(guide_off[1])) > 30.0) {
+    eventf(EV_WARN, 0, guide_off[0], guide_off[1], "no centre rail: a guide axle drifted %.0f mm off the rail line (the real robot would leave the rail)", fmax(fabs(guide_off[0]), fabs(guide_off[1])));
+    offrail_reported = true;
+  }
 
-  // end walls of the field (rail ends)
-  const double rear_end = x_m * 1000.0 - prm.rear_overhang_mm;
-  const double front_end = x_m * 1000.0 + (prm.length_mm - prm.rear_overhang_mm);
+  // end walls of the field: use the chassis corners (yaw included)
+  const double fe = (prm.length_mm - prm.rear_overhang_mm), re = -prm.rear_overhang_mm, hw = prm.width_mm * 0.5;
+  const double x_hi = fe * c2 + hw * fabs(s2), x_lo = re * c2 - hw * fabs(s2);  // corner extremes relative to the motor axle
+  const double rear_end = x_m * 1000.0 + x_lo;
+  const double front_end = x_m * 1000.0 + x_hi;
+  bool stop_fwd = false;
   if (rear_end < 0) {
-    x_m = prm.rear_overhang_mm / 1000.0;
+    x_m = -x_lo / 1000.0;
     if (v_ms < 0) {
       // a resting re-contact (< 1 mm/s) right after a hit is not a new collision
       if (collision != -1 && v_ms < -0.001) eventf(EV_COLLISION, -1, v_ms * 1000, 0, "rear wall hit at %.0f mm/s", v_ms * 1000);
-      v_ms = 0;
+      stop_fwd = true;
     }
     collision = -1;
   } else if (front_end > prm.track_len_mm) {
-    x_m = (prm.track_len_mm - (prm.length_mm - prm.rear_overhang_mm)) / 1000.0;
+    x_m = (prm.track_len_mm - x_hi) / 1000.0;
     if (v_ms > 0) {
       if (collision != 1 && v_ms > 0.001) eventf(EV_COLLISION, 1, v_ms * 1000, 0, "front wall hit at %.0f mm/s", v_ms * 1000);
-      v_ms = 0;
+      stop_fwd = true;
     }
     collision = 1;
   } else {
     collision = 0;
+  }
+  if (stop_fwd) {  // the wall removes the along-track motion of the whole body
+    vcx = 0;
+    v_ms = 0;
+  }
+  // sideways: the work area is open (trays/tables are not obstacles here) -> warning only
+  if (!lateral_reported) {
+    const double ylat = fmax(fabs(y_m * 1000.0 + fe * s2) , fabs(y_m * 1000.0 + re * s2)) + hw * fabs(c2);
+    if (ylat > prm.work_half_w) {
+      eventf(EV_WARN, 0, ylat, 0, "robot body left the %.0f mm wide work area sideways (%.0f mm from the centre)", prm.work_half_w * 2, ylat);
+      lateral_reported = true;
+    }
   }
 
   update_sensors();
@@ -644,7 +679,7 @@ double servo_target(int ch) { return (ch >= 0 && ch < 6) ? servos[ch].target : 0
 
 // ================================================================== frames
 static uint32_t last_loops = 0, last_reads = 0, last_i2c = 0, last_can = 0;
-static float last_sig[8];
+static float last_sig[12];
 static uint64_t last_activity_us = 0;
 static bool started_once = false;
 extern uint32_t console_bytes;
@@ -697,9 +732,9 @@ void world_frame() {
 
   // idle detection: nothing moves, no LED/serial change for run.idleStopSeconds -> end
   static uint32_t last_console = 0;
-  const float sig[8] = {f[1], f[16], f[17], f[15], f[18], f[19], f[7], f[8]};
+  const float sig[12] = {f[1], f[16], f[17], f[15], f[18], f[19], f[7], f[8], f[39], f[40], f[11], f[12]};
   bool active = console_bytes != last_console || fabsf(f[2]) > 0.2f;
-  for (int i = 0; i < 8; ++i) if (fabsf(sig[i] - last_sig[i]) > 0.01f) active = true;
+  for (int i = 0; i < 12; ++i) if (fabsf(sig[i] - last_sig[i]) > 0.01f) active = true;
   memcpy(last_sig, sig, sizeof sig);
   last_console = console_bytes;
   if (start_button_pressed() || dc_enabled) started_once = true;
