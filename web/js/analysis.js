@@ -12,7 +12,7 @@ export function analyseRun(frames, serial, events, params) {
   const sensorPorts = rg.sensors.map((s) => s.port);
   const startZone = geo.startZone;
   // all four wheels inside the green start zone (motor axle position -> wheel edges)
-  const wheelsInStart = (axle) => axle + rg.rearAxle - rg.r >= 0 && axle + rg.frontAxle + rg.r <= startZone;
+  const wheelsInStart = (axle) => axle + rg.rearAxle - rg.rearR >= 0 && axle + rg.frontAxle + rg.frontR <= startZone;
   const n = frames.length;
   const stops = [];
   const legs = [];

@@ -156,20 +156,21 @@ export class View3D {
     // wheels: driven pair on the motor axle, passive pair (omni) on the other axle
     this.wheels = [];
     this.passiveWheels = [];
-    const wheelGeo = new THREE.CylinderGeometry(R, R, 30, 40);
-    wheelGeo.rotateZ(Math.PI / 2);
     for (const [z, driven, tag] of [[0, true, rg.motorFront ? 'front' : 'rear'], [rg.passiveAxle, false, rg.motorFront ? 'rear' : 'front']]) {
+      const wr = driven ? R : rg.passiveR;
+      const wheelGeo = new THREE.CylinderGeometry(wr, wr, 30, 40);
+      wheelGeo.rotateZ(Math.PI / 2);
       for (const sx of [-1, 1]) {
         const w = add(new THREE.Mesh(wheelGeo, mat(driven ? COLORS.wheel : 0x5f7f99)), `wheel-${tag}-${sx > 0 ? 'L' : 'R'}`);
-        w.position.set(sx * (rg.track / 2), R, z);
+        w.position.set(sx * (rg.track / 2), wr, z);
         w.castShadow = true;
-        const spoke = new THREE.Mesh(new THREE.BoxGeometry(32, R * 1.4, 8), mat(driven ? 0xb0b8c0 : 0xdfe6ec));
+        const spoke = new THREE.Mesh(new THREE.BoxGeometry(32, wr * 1.4, 8), mat(driven ? 0xb0b8c0 : 0xdfe6ec));
         w.add(spoke);
         (driven ? this.wheels : this.passiveWheels).push(w);
       }
       const axle = add(new THREE.Mesh(new THREE.CylinderGeometry(4, 4, rg.track, 10), mat(0x6f7a85, { metalness: 0.6 })), `axle-${tag}`);
       axle.rotation.z = Math.PI / 2;
-      axle.position.set(0, R, z);
+      axle.position.set(0, wr, z);
     }
     // centre-rail guide rollers at both axles (one on each side of the rail)
     const rollerGeo = new THREE.CylinderGeometry(9, 9, Math.max(rg.rail.height, 12), 16);
@@ -263,7 +264,8 @@ export class View3D {
     // wheel spin from travel
     const ang = f[F.x] / (this.rg ? this.rg.r : 51.5);
     for (const w of this.wheels) w.rotation.x = ang;
-    for (const w of this.passiveWheels || []) w.rotation.x = ang;
+    const angP = f[F.x] / (this.rg ? this.rg.passiveR : 45);
+    for (const w of this.passiveWheels || []) w.rotation.x = angP;
     // sensors
     const lv = [f[F.sA], f[F.sB], f[F.sC], f[F.sD]];
     const black = Number(p['sensor.blackLevel'] ?? 1);

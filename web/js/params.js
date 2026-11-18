@@ -33,17 +33,18 @@ export const PARAM_SPECS = [
   // robot geometry (1 unit = 1 mm everywhere: physics, analysis and 3D)
   ['robot.lengthMm', 480, '차체 길이', 'mm', '로봇 형상', '가정값 (규정 500 이내). 실측값으로 바꾸세요'],
   ['robot.widthMm', 400, '차체 폭', 'mm', '로봇 형상', '가정값 (규정 500 이내)'],
-  ['robot.rearOverhangMm', 270, '로봇 뒤끝 → 모터축', 'mm', '로봇 형상', '실측: 뒤끝을 경기장 시작 끝에 붙였을 때 모터축까지 270mm'],
+  ['robot.rearOverhangMm', 270, '로봇 뒤끝 → 모터축', 'mm', '로봇 형상', '실측: 로봇을 시작 위치 끝까지 붙였을 때 경기장 끝 → 모터축(앞바퀴) 중심 270mm'],
   ['robot.startAxleMm', 270, '시작 시 모터축 위치', 'mm', '로봇 형상', '실측: 경기장 시작 끝에서 270mm (로봇 뒤끝이 시작 끝에 닿은 상태)'],
-  ['robot.motorAxle', 'front', '모터가 달린 축', '', '로봇 형상', 'front = 앞축 구동(가정, 시작 270mm·0번 앞 150mm와 맞는 배치), rear = 뒷축 구동'],
-  ['robot.wheelbaseMm', 218.5, '앞바퀴축 ↔ 뒷바퀴축', 'mm', '로봇 형상', '가정값: 뒷바퀴 뒤끝 = 로봇 뒤끝(270 − 51.5). 실측 권장'],
+  ['robot.motorAxle', 'front', '모터가 달린 축', '', '로봇 형상', '실측: 모터축 = 앞바퀴 (rear로 바꾸면 뒷축 구동)'],
+  ['robot.wheelbaseMm', 224, '모터축(앞) ↔ 뒷바퀴축', 'mm', '로봇 형상', '실측: 두 축 중심 사이 22.4cm'],
+  ['robot.passiveWheelDiameterMm', 90, '뒷바퀴(비구동) 지름', 'mm', '로봇 형상', '가정값·표시용(물리 영향 없음). 뒷바퀴축이 시작 끝에서 46mm라 92mm 이하여야 경기장 안에 들어감'],
   ['robot.trackMm', 320, '좌우 바퀴 간격(중심)', 'mm', '로봇 형상', '가정값. 가운데 레일을 좌우 바퀴가 사이에 두고 달림'],
   ['sensor.0.port', 4, '앞 센서 포트', '', '센서', '코드: FRONT_PORT=4'],
-  ['sensor.0.axle', 'front', '앞 센서 기준 바퀴', '', '센서', '실측: 앞바퀴'],
-  ['sensor.0.aheadMm', 20, '앞 센서: 바퀴 앞끝에서 앞으로', 'mm', '센서', '실측 2cm → 앞바퀴축에서 51.5 + 20 = 71.5mm'],
+  ['sensor.0.axle', 'front', '4번 센서 기준 축', '', '센서', '실측: 모터축(앞바퀴)'],
+  ['sensor.0.fromAxleMm', 65, '4번 센서: 축 중심에서 앞으로', 'mm', '센서', '실측: 모터축 바퀴 축 중심에서 6.5cm'],
   ['sensor.1.port', 5, '중심 센서 포트', '', '센서', '코드: CENTER_PORT=5'],
-  ['sensor.1.axle', 'rear', '중심 센서 기준 바퀴', '', '센서', '실측: 뒷바퀴 (코드 주석: 뒷바퀴 바로 앞)'],
-  ['sensor.1.aheadMm', 20, '중심 센서: 바퀴 앞끝에서 앞으로', 'mm', '센서', '실측 2cm → 뒷바퀴축에서 71.5mm'],
+  ['sensor.1.axle', 'rear', '5번 센서 기준 축', '', '센서', '실측: 뒷바퀴축 (코드 주석: 뒷바퀴 바로 앞)'],
+  ['sensor.1.fromAxleMm', 85, '5번 센서: 축 중심에서 앞으로', 'mm', '센서', '실측: 뒷바퀴축 축 중심에서 8.5cm'],
   ['sensor.marginMm', 0, '검정 판정 여유', 'mm', '센서', '+면 선이 넓게, −면 좁게 감지'],
   ['sensor.latencyMs', 0.3, '센서 응답 지연', 'ms', '센서', 'IR 반사형 디지털 출력 가정'],
   ['sensor.blackLevel', 1, '검정일 때 출력', '', '센서', 'PRIZM 라인센서: 검정=1'],
@@ -58,7 +59,7 @@ export const PARAM_SPECS = [
   ['rail.rollerFriction', 0.02, '롤러 구름 저항 계수', '', '레일', '접촉력 × 계수만큼 진행 방향 저항'],
 
   // drive train
-  ['drive.wheelDiameterMm', 103, '바퀴 지름', 'mm', '구동', '실측 10.3cm (앞·뒤 바퀴 동일) → 바퀴 1회전 323.6mm'],
+  ['drive.wheelDiameterMm', 103, '모터축 바퀴 지름', 'mm', '구동', '실측 10.3cm → 바퀴 1회전 323.6mm'],
   ['drive.gearRatio', 2, '모터 회전 / 바퀴 회전', '', '구동', '교육자료: 모터 40T → 바퀴 80T (모터 1440 / 바퀴 2880 카운트). 직결이면 1'],
   ['drive.rightWheelScale', 1.0, '오른쪽 바퀴 유효 지름 배율', '', '구동', '좌우 바퀴 차이 시험용 (1 = 같음)'],
   ['robot.motor1Forward', 1, '모터1 전진 부호', '', '구동', '코드: setMotorSpeeds(+v, −v). 모터1 = 오른쪽'],
@@ -122,11 +123,12 @@ export const PARAM_SPECS = [
   ['cpu.loopUs', 3, 'loop() 사이 오버헤드', 'µs', '실행', ''],
 ];
 
-export const PARAMS_VERSION = 3;
+export const PARAMS_VERSION = 4;
 // keys whose defaults changed (2: arm faces the field, 3: measured robot geometry + centre rail)
 export const MIGRATE_KEYS = {
   2: ['viz.armZeroDeg', 'viz.armBaseMm', 'viz.j1Sign', 'viz.wristSign'],
   3: ['robot.rearOverhangMm', 'robot.startAxleMm', 'robot.lengthMm', 'viz.armBaseMm', 'field.gapMm', 'field.lineWidthMm', 'field.firstGapMm', 'field.lastGapMm', 'field.lineCount'],
+  4: ['robot.wheelbaseMm', 'robot.motorAxle', 'sensor.0.axle', 'sensor.1.axle', 'drive.wheelDiameterMm', 'robot.rearOverhangMm', 'robot.startAxleMm'],
 };
 // drop values that an older version saved/exported for keys whose meaning or default changed
 export function migrateParams(saved) {
@@ -172,7 +174,8 @@ export function robotGeometry(p) {
   const D = num(p['drive.wheelDiameterMm'], 103);
   const G = num(p['drive.gearRatio'], 2) || 1;
   const r = D / 2;
-  const wb = num(p['robot.wheelbaseMm'], 218.5);
+  const wb = num(p['robot.wheelbaseMm'], 224);
+  const rp = num(p['robot.passiveWheelDiameterMm'], 90) / 2;
   const motorFront = String(p['robot.motorAxle'] ?? 'front').toLowerCase() !== 'rear';
   const frontAxle = motorFront ? 0 : wb;
   const rearAxle = motorFront ? -wb : 0;
@@ -181,12 +184,13 @@ export function robotGeometry(p) {
   const sensors = [0, 1].map((i) => {
     const axle = String(p[`sensor.${i}.axle`] ?? (i ? 'rear' : 'front')).toLowerCase() === 'rear' ? 'rear' : 'front';
     const axleS = axle === 'front' ? frontAxle : rearAxle;
-    const ahead = num(p[`sensor.${i}.aheadMm`], 20);
-    return { port: num(p[`sensor.${i}.port`], i ? 5 : 4), axle, axleS, ahead, s: axleS + r + ahead };
+    const fromAxle = num(p[`sensor.${i}.fromAxleMm`], i ? 85 : 65);
+    return { port: num(p[`sensor.${i}.port`], i ? 5 : 4), axle, axleS, fromAxle, s: axleS + fromAxle };
   });
   return {
     D, r, G, wheelCirc: Math.PI * D, mmPerRev: (Math.PI * D) / G,
     motorFront, wheelbase: wb, frontAxle, rearAxle, passiveAxle: motorFront ? rearAxle : frontAxle,
+    passiveR: rp, frontR: motorFront ? r : rp, rearR: motorFront ? rp : r,
     rearEnd, frontEnd, length: frontEnd - rearEnd, width: num(p['robot.widthMm'], 400), track: num(p['robot.trackMm'], 320),
     start: num(p['robot.startAxleMm'], 270), sensors,
     rail: { enabled: num(p['rail.enabled'], 1) !== 0, width: num(p['rail.widthMm'], 30), height: num(p['rail.heightMm'], 20), clearance: num(p['rail.clearanceMm'], 1) },
