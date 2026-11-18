@@ -138,7 +138,7 @@ if (realLogPath && mission) {
   measured.alignment = { realDeg: deg, realMm, simMm };
   check('1', '0번 정렬 이동거리 (실물 로그 vs 시뮬)', Math.abs(realMm - simMm) <= 5 ? true : null,
     `실물 로그: 엔코더 ${deg.toFixed(1)}° → ${realMm.toFixed(1)} mm (모터 1회전 ${rg.mmPerRev.toFixed(1)} mm 기준). 시뮬: ${simMm.toFixed(1)} mm (로봇을 끝까지 붙였을 때가 최대). ` +
-    (Math.abs(realMm - simMm) <= 5 ? '일치' : `차이 ${(realMm - simMm).toFixed(1)} mm → 로그 당시 로봇이 시작 끝에 붙어 있었다면 첫 칸 150 mm·5번 센서 위치·기어비 중 하나가 실물과 다름. 시작 위치가 아닌 곳에서 찍은 로그라면 비교 대상이 아님`));
+    (Math.abs(realMm - simMm) <= 5 ? '일치' : `차이 ${(realMm - simMm).toFixed(1)} mm → 로그 당시 로봇이 시작 끝에 붙어 있었다면 첫 칸 길이·5번 센서 위치·축간·기어비 중 하나가 실물과 다름. 시작 위치가 아닌 곳에서 찍은 로그라면 비교 대상이 아님`));
 }
 
 // 1b-1e. physics consistency with a probe sketch
@@ -339,8 +339,8 @@ class Adafruit_NeoPixel { public:
   check('1', '규정 V1.3 경기장 프리셋', g.pitch === 370 && Math.abs(g.length - 1860) < 0.01 && g.startZone === 500,
     `선 간격 ${g.pitch} mm, 전장 ${g.length} mm, 시작구역 ${g.startZone} mm`);
   const gm = fieldGeometry(defaultParams());
-  check('1', '실측 경기장 (기본값)', gm.pitch === 480 && gm.width === 10 && gm.lines[0] === 155,
-    `라인 사이 470 + 선 10 → 선 중심 간격 ${gm.pitch} mm, 0번 선 중심 ${gm.lines[0]} mm, 전장 ${gm.length} mm`);
+  check('1', '실측 경기장 (기본값)', gm.pitch === 370 && gm.width === 10 && gm.lines[0] === 168 && Math.abs(gm.length - 1816) < 0.01,
+    `라인 사이 360 + 선 10 → 선 중심 간격 ${gm.pitch} mm, 0번 선 중심 ${gm.lines[0]} mm, 전장 ${gm.length} mm`);
 }
 
 // ============================================================ measured geometry + centre rail (2026-11-19 change)
@@ -391,16 +391,22 @@ void loop() {}
   const encGaps = [s5, s4].flatMap((sg) => sg.slice(1).map((q, i) => encMm(q.tin) - encMm(sg[i].tout))); // same sensor, consecutive lines
   const rng = (a) => `${Math.min(...a).toFixed(2)}~${Math.max(...a).toFixed(2)}`;
   measured.field = { widths, gaps, pitches, encGaps, firstEdge: s5.length ? s5[0].in : null, lineCount: s4.length };
-  const endGap = geo.length - lineSeg[4].out;
-  check('치수', '① 한 칸(흰색만) 47cm [센서 전환 위치 + 엔코더 환산]', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 470) < 0.05),
+  // far end wall measured physically: the sweep drives into it; wall = motor axle at contact + front overhang
+  const hit = r.events.find((e) => e.type === 3 && e.a === 1);
+  const wallPos = hit ? xAt(hit.t) + rg.frontEnd : NaN;
+  const endGap = wallPos - lineSeg[4].out;
+  measured.fieldLength = wallPos;
+  check('치수', '① 라인 사이 흰색 구간 36cm [센서 전환 위치 + 엔코더 환산]', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 360) < 0.05) && pitches.every((q) => Math.abs(q - 370) < 0.05),
     `센서가 실제로 선을 지나며 잰 선 사이 흰 구간 ${gaps.map((g) => g.toFixed(2)).join(' / ')} mm (선 중심 간격 ${rng(pitches)} mm, 두 센서 측정 일치=${agree}). 로봇 엔코더로 환산하면 ${rng(encGaps)} mm (타이어 미끄럼 0.2% 포함)`);
-  check('치수', '② 맨 끝 칸(0번 앞, 4번 뒤 흰색만) 15cm [센서 전환 위치]', Math.abs(lineSeg[0].in - 150) < 0.05 && Math.abs(endGap - 150) < 0.05,
-    `시작 끝 → 0번 선 ${lineSeg[0].in.toFixed(2)} mm (5번 센서), 4번 선 → 반대쪽 끝 ${endGap.toFixed(2)} mm (4번 센서), 전장 ${geo.length} mm`);
+  check('치수', '② 양 끝 칸(0번 앞, 4번 뒤 흰색만) 16.3cm [센서 전환 위치 + 끝 벽 접촉]', Math.abs(lineSeg[0].in - 163) < 0.05 && Math.abs(endGap - 163) < 0.5,
+    `시작 끝 → 0번 선 ${lineSeg[0].in.toFixed(2)} mm (5번 센서), 4번 선 → 반대쪽 끝 벽 ${endGap.toFixed(2)} mm (4번 센서 + 로봇이 벽에 닿은 위치)`);
+  check('치수', '전체 길이 181.6cm [시작 끝 ↔ 반대쪽 끝 벽]', Math.abs(wallPos - 1816) < 0.5 && Math.abs(geo.length - 1816) < 0.01,
+    `로봇이 반대쪽 끝 벽에 닿은 위치에서 잰 벽 위치 ${wallPos.toFixed(2)} mm (모터축 ${hit ? xAt(hit.t).toFixed(2) : '?'} + 앞끝 ${rg.frontEnd} mm), 설정 전장 ${geo.length} mm = 163 + 10×5 + 360×4 + 163`);
   check('치수', '③ 검은 선 1cm [센서 전환 위치]', widths.length === 5 && widths.every((w) => Math.abs(w - 10) < 0.05),
     `0~4번 선 검정 구간 폭 ${widths.map((w) => w.toFixed(2)).join(' / ')} mm`);
   // wheel diameter from encoder vs travel at constant speed. Run 1: no rolling resistance,
   // so the tyre carries no load and does not creep -> pure rolling kinematics.
-  const tA = 15000, tB = 45000;
+  const tA = 10000, tB = 35000;
   const wheelFrom = (rr) => {
     const xa = (t, key = F.x) => { let i = rr.frames.findIndex((f) => f[F.t] >= t); const a = rr.frames[i - 1], b = rr.frames[i], w = (t - a[F.t]) / (b[F.t] - a[F.t]); return a[key] + (b[key] - a[key]) * w; };
     const dX = xa(tB) - xa(tA), dCounts = xa(tB, F.enc1) - xa(tA, F.enc1);
@@ -455,7 +461,7 @@ void loop() {}
   check('치수', '⑦ 4번 센서: 모터축 바퀴 축 중심에서 6.5cm [선 감지 시각 측정]', Math.abs(s4m.off - 65) < 0.05,
     `선 검정 진입 ${s4m.n}회의 시각에서 (선 앞 경계 − 그때 모터축 위치) = +${s4m.off.toFixed(2)} mm (편차 ${s4m.spread.toFixed(3)} mm). 시작 시 경기장 끝에서 ${(270 + s4m.off).toFixed(1)} mm`);
   check('치수', '⑧ 5번 센서: 뒷바퀴축 축 중심에서 8.5cm [선 감지 시각 측정]', Math.abs(s5FromRear - 85) < 0.1,
-    `(선 앞 경계 − 모터축 위치) = ${s5m.off.toFixed(2)} mm (검정 진입 ${s5m.n}회) → 뒷바퀴축(모터축 −${measured.wheelbaseMm.toFixed(2)})에서 +${s5FromRear.toFixed(2)} mm. 시작 시 경기장 끝에서 ${(270 + s5m.off).toFixed(1)} mm (0번 선 150 mm보다 ${(150 - 270 - s5m.off).toFixed(1)} mm 뒤)`);
+    `(선 앞 경계 − 모터축 위치) = ${s5m.off.toFixed(2)} mm (검정 진입 ${s5m.n}회) → 뒷바퀴축(모터축 −${measured.wheelbaseMm.toFixed(2)})에서 +${s5FromRear.toFixed(2)} mm. 시작 시 경기장 끝에서 ${(270 + s5m.off).toFixed(1)} mm (0번 선 ${lineSeg[0].in.toFixed(0)} mm보다 ${(lineSeg[0].in - 270 - s5m.off).toFixed(1)} mm 뒤)`);
 
   // centre rail: same disturbances with the rail on and off
   const DIST = {
@@ -528,19 +534,24 @@ if (beforePath && mission && fs.existsSync(beforePath)) {
   const alignB = { d: B.stops[0].axle - bFrames[0].x, t: (tOf(B.serial, /BASE_DONE line=0/) - tOf(B.serial, /BASE_SEEK_ZERO/)) / 1000 };
   const alignA = { d: aS.stops[0].axle - aFrames[0][F.x], t: (tOf(A.serial, /BASE_DONE line=0/) - tOf(A.serial, /BASE_SEEK_ZERO/)) / 1000 };
   // first black of each sensor per line during the scoring run (line detection timing)
+  const bCm = B.params['geom.mmPerRev'] ?? B.params['drive.mmPerRev'] ?? 153.2;
+  const bGeo = fieldGeometry(B.params);
+  const bS4 = B.params['geom.sensor.0.s'] ?? B.params['sensor.0.offsetMm'], bS5 = B.params['geom.sensor.1.s'] ?? B.params['sensor.1.offsetMm'];
+  const bRear = B.params['geom.rearEndS'] ?? -(B.params['robot.rearOverhangMm'] ?? 70);
   const firstBlack = (events, port, lines, wid) => lines.map((c) => { const e = events.find((q) => q.type === 2 && q.a === port && q.b === 1 && Math.abs(q.c - (c - wid / 2)) < 0.6); return e ? e.t : null; });
   const geo = fieldGeometry(defaultParams());
-  const fbA4 = firstBlack(A.events, 4, geo.lines, geo.width), fbB4 = firstBlack(B.events, 4, geo.lines, geo.width);
-  const fbA5 = firstBlack(A.events, 5, geo.lines, geo.width), fbB5 = firstBlack(B.events, 5, geo.lines, geo.width);
-  const bCm = B.params['drive.mmPerRev'] ?? 153.2;
+  const fbA4 = firstBlack(A.events, 4, geo.lines, geo.width), fbB4 = firstBlack(B.events, 4, bGeo.lines, bGeo.width);
+  const fbA5 = firstBlack(A.events, 5, geo.lines, geo.width), fbB5 = firstBlack(B.events, 5, bGeo.lines, bGeo.width);
   const rgA = robotGeometry(defaultParams());
   comparison = {
     rows: [
-      ['모터 1회전당 이동', `${bCm} mm`, `${rgA.mmPerRev.toFixed(2)} mm`],
+      ['경기장 (흰 구간 / 양 끝 / 선 폭)', `${B.params['field.gapMm']} / ${B.params['field.firstGapMm']} / ${B.params['field.lineWidthMm']} mm`, `${defaultParams()['field.gapMm']} / ${defaultParams()['field.firstGapMm']} / ${defaultParams()['field.lineWidthMm']} mm`],
+      ['선 중심 간격 / 전장', `${bGeo.pitch} / ${bGeo.length} mm`, `${geo.pitch} / ${geo.length} mm`],
+      ['모터 1회전당 이동', `${(+bCm).toFixed(2)} mm`, `${rgA.mmPerRev.toFixed(2)} mm`],
       ['720 deg/s 명령 최고 속도', `${B.summary.maxSpeedMmS} mm/s`, `${aS.summary.maxSpeedMmS} mm/s`],
-      ['선 중심 간격 480 mm = 모터 회전각', `${(480 / bCm * 360).toFixed(0)}°`, `${(480 / rgA.mmPerRev * 360).toFixed(0)}°`],
-      ['시작 위치 (구동축/모터축)', `${bFrames[0].x} mm (뒤끝 ${bFrames[0].x - (B.params['robot.rearOverhangMm'] ?? 70)} mm)`, `${aFrames[0][F.x]} mm (뒤끝 0 mm)`],
-      ['센서 위치 (구동축/모터축 기준)', `4번 +${B.params['sensor.0.offsetMm']} · 5번 +${B.params['sensor.1.offsetMm']} mm`, `4번 +${rgA.sensors[0].s} · 5번 ${rgA.sensors[1].s} mm`],
+      ['선 한 칸 = 모터 회전각', `${(bGeo.pitch / bCm * 360).toFixed(0)}°`, `${(geo.pitch / rgA.mmPerRev * 360).toFixed(0)}°`],
+      ['시작 위치 (모터축)', `${bFrames[0].x} mm (뒤끝 ${(bFrames[0].x + bRear).toFixed(0)} mm)`, `${aFrames[0][F.x]} mm (뒤끝 0 mm)`],
+      ['센서 위치 (모터축 기준)', `4번 ${bS4 >= 0 ? '+' : ''}${bS4} · 5번 ${bS5 >= 0 ? '+' : ''}${bS5} mm`, `4번 +${rgA.sensors[0].s} · 5번 ${rgA.sensors[1].s} mm`],
       ['0번 정렬 (5번 센서가 0번 선까지)', `${alignB.d.toFixed(1)} mm 이동, ${alignB.t.toFixed(2)} s`, `${alignA.d.toFixed(1)} mm 이동, ${alignA.t.toFixed(2)} s`],
       ['첫 움직임', `${B.summary.firstMotionS} s`, `${aS.summary.firstMotionS} s`],
       ['정지 순서', B.summary.stopLines, aS.summary.stopLines],
