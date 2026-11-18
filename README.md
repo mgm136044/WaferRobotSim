@@ -44,7 +44,7 @@ runtime/include/   스케치가 보는 헤더: Arduino.h, Wire.h, HardwareSerial
                    driver/gptimer.h, hal/gpio_ll.h, soc/gpio_struct.h, freertos/*, esp_*.h
 runtime/src/       가상 하드웨어 (C++ → wasm 오브젝트로 미리 빌드)
   core.cpp          가상 시계(µs)·스케줄러·GPIO·Arduino API (모든 API 호출이 시간을 씀)
-  physics.cpp       PRIZM DC 모터 칩(I2C 0x05) + TorqueNADO 모터 + 레일 주행 차체 + 라인센서
+  physics.cpp       PRIZM DC 모터 칩(I2C 0x05) + TorqueNADO 모터 + 가운데 레일로 안내되는 평면 차체 + 라인센서
                     + Z 스텝모터 + PRIZM 서보 칩(0x06) + LED/버튼
   wire.cpp          Wire/Wire1 I2C (버스 시간 포함)
   uart_can.cpp      UART1 38400bps → Serial-CAN 변환기 → AServo 2축 CiA-402 (SDO, PP/호밍, S-커브)
@@ -70,9 +70,10 @@ node tools/run-sketch.mjs ../Wafer_Transfer_Robot_final --csv out.csv
 
 ## 검증
 
-`node tools/verify.mjs --zip <팀 스케치 zip> --real-log <실물 시리얼 로그> --prizm-lib <TETRIX_PRIZM_PRO 폴더>`
+`node tools/verify.mjs --zip <팀 스케치 zip> --real-log <실물 시리얼 로그> --prizm-lib <TETRIX_PRIZM_PRO 폴더> [--before <이전 버전 실행 결과 json>]`
 → 요구사항별 측정 기준으로 검사하고 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 다시 씁니다
-(원본 무수정 여부, 전체 미션 완주, 실측 BASE_TRACE·CAN 시간 재현, 원본 PRIZM 라이브러리와 I2C 바이트 일치, 물리 일관성, 경기장 치수).
+(원본 무수정 여부, 전체 미션 완주, 실측 BASE_TRACE·CAN 시간 재현, 원본 PRIZM 라이브러리와 I2C 바이트 일치, 물리 일관성,
+시뮬 안에서 잰 라인 간격·폭·바퀴 지름·시작 위치·IR 센서 위치, 가운데 레일 구속 시험(레일 켬/끔), 수정 전후 비교).
 팀 코드와 PRIZM 라이브러리는 지정한 경로에서 읽기만 하고 저장소에 넣지 않습니다.
 
 실물과의 차이점은 [docs/DIFFERENCES.md](docs/DIFFERENCES.md) 참고.
