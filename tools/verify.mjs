@@ -367,10 +367,13 @@ void loop() {}
   const encGaps = [s5, s4].flatMap((sg) => sg.slice(1).map((q, i) => encMm(q.tin) - encMm(sg[i].tout))); // same sensor, consecutive lines
   const rng = (a) => `${Math.min(...a).toFixed(2)}~${Math.max(...a).toFixed(2)}`;
   measured.field = { widths, gaps, pitches, encGaps, firstEdge: s5.length ? s5[0].in : null, lineCount: s4.length };
-  check('치수', '라인 간격 47cm (라인과 라인 사이 흰 구간)', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 470) < 0.05),
-    `센서가 실제로 선을 지나며 측정한 흰 구간 ${gaps.map((g) => g.toFixed(2)).join(' / ')} mm, 선 중심 간격 ${rng(pitches)} mm (두 센서 측정 일치=${agree}). 로봇 엔코더로 환산하면 ${rng(encGaps)} mm (바퀴 미끄럼 0.2% 포함)`);
-  check('치수', '검정 라인 폭 1cm', widths.length === 5 && widths.every((w) => Math.abs(w - 10) < 0.05),
-    `0~4번 선 검정 구간 폭 ${widths.map((w) => w.toFixed(2)).join(' / ')} mm, 시작 끝 → 0번 선 ${lineSeg[0].in.toFixed(2)} mm, 4번 선 → 끝 ${(geo.length - lineSeg[4].out).toFixed(2)} mm, 전장 ${geo.length} mm`);
+  const endGap = geo.length - lineSeg[4].out;
+  check('치수', '① 한 칸(흰색만) 47cm', lineSeg.every(Boolean) && agree && gaps.length === 4 && gaps.every((g) => Math.abs(g - 470) < 0.05),
+    `센서가 실제로 선을 지나며 잰 선 사이 흰 구간 ${gaps.map((g) => g.toFixed(2)).join(' / ')} mm (선 중심 간격 ${rng(pitches)} mm, 두 센서 측정 일치=${agree}). 로봇 엔코더로 환산하면 ${rng(encGaps)} mm (타이어 미끄럼 0.2% 포함)`);
+  check('치수', '② 맨 끝 칸(0번 앞, 4번 뒤 흰색만) 15cm', Math.abs(lineSeg[0].in - 150) < 0.05 && Math.abs(endGap - 150) < 0.05,
+    `시작 끝 → 0번 선 ${lineSeg[0].in.toFixed(2)} mm (5번 센서), 4번 선 → 반대쪽 끝 ${endGap.toFixed(2)} mm (4번 센서), 전장 ${geo.length} mm`);
+  check('치수', '③ 검은 선 1cm', widths.length === 5 && widths.every((w) => Math.abs(w - 10) < 0.05),
+    `0~4번 선 검정 구간 폭 ${widths.map((w) => w.toFixed(2)).join(' / ')} mm`);
   // wheel diameter from encoder vs travel at constant speed. Run 1: no rolling resistance,
   // so the tyre carries no load and does not creep -> pure rolling kinematics.
   const tA = 15000, tB = 45000;
@@ -383,26 +386,46 @@ void loop() {}
   const rFree = await run(c.wasm, { ...params, 'robot.rollResistN': 0, 'robot.rollViscous': 0 });
   const wFree = wheelFrom(rFree), wLoad = wheelFrom(r);
   measured.wheel = { free: wFree, loaded: wLoad };
-  check('치수', '바퀴 지름 10.3cm (회전수 ↔ 이동거리)', Math.abs(wFree.dMeas - 103) < 0.01 && Math.abs(wLoad.dMeas - 103) < 0.5,
+  check('치수', '④ 모터축 바퀴 지름 10.3cm (회전수 ↔ 이동거리)', Math.abs(wFree.dMeas - 103) < 0.01 && Math.abs(wLoad.dMeas - 103) < 0.5,
     `${((tB - tA) / 1000)}초 등속 구간에서 차체 이동 ÷ (엔코더 회전 ÷ 기어 ${rg.G}): 미끄럼 없는 조건 ${wFree.dX.toFixed(2)} mm / 바퀴 ${wFree.wheelRevs.toFixed(4)}회전 → 1회전 ${wFree.perRev.toFixed(2)} mm, 지름 ${wFree.dMeas.toFixed(3)} mm. 기본 설정(구름 저항 있음)은 타이어 미끄럼 때문에 1회전 ${wLoad.perRev.toFixed(2)} mm (지름 환산 ${wLoad.dMeas.toFixed(2)} mm, −${((1 - wLoad.dMeas / 103) * 100).toFixed(2)}%)`);
   // start position
   const f0 = fr[0];
   const rearAt0 = f0[F.x] + rg.rearEnd;
   const firstMove = fr.find((f) => Math.abs(f[F.x] - f0[F.x]) > 0.01);
   measured.start = { axle: f0[F.x], rear: rearAt0 };
-  check('치수', '시작 위치 27cm (시작 끝 → 모터축)', Math.abs(f0[F.x] - 270) < 0.01 && Math.abs(rearAt0) < 0.01,
+  check('치수', '⑤ 시작 위치: 경기장 끝 → 모터축 중심 27cm', Math.abs(f0[F.x] - 270) < 0.01 && Math.abs(rearAt0) < 0.01,
     `시뮬 시작 프레임: 모터축 ${f0[F.x].toFixed(2)} mm, 로봇 뒤끝 ${rearAt0.toFixed(2)} mm (= 시작 끝에 닿음), 첫 이동 ${firstMove ? (firstMove[F.t] / 1000).toFixed(3) + '초' : '없음'}`);
-  // sensor positions = where the sensor is when it switches on an edge, minus the axle position then
-  const sensMeas = rg.sensors.map((sn, i) => {
+  // wheelbase from rigid-body motion: with the rail engaged and only one motor driving, the
+  // chassis yaws against the front and rear guide rollers, which sit on the two axles.
+  // axle distance = (front guide offset - rear guide offset) / tan(yaw)
+  {
+    const one = await compile({ 'OneMotorWB/OneMotorWB.ino': `#include <PRIZM_PRO.h>
+PRIZM prizm;
+void setup() { prizm.PrizmBegin(); prizm.setMotorPower(2, 0); prizm.setMotorSpeed(1, 400); delay(4000); prizm.setMotorPowers(125, 125); delay(500); }
+void loop() {}
+` });
+    const ro = await run(one.wasm, params);
+    const wbs = ro.frames.filter((f) => Math.abs(f[F.yaw]) > 0.2).map((f) => (f[F.guideF] - f[F.guideR]) / Math.tan((f[F.yaw] * Math.PI) / 180));
+    const wbMeas = wbs.reduce((a, b) => a + b, 0) / wbs.length;
+    measured.wheelbase = { n: wbs.length, mean: wbMeas, min: Math.min(...wbs), max: Math.max(...wbs) };
+    check('치수', '⑥ 모터축(앞) ↔ 뒷바퀴축 중심 22.4cm', wbs.length > 50 && Math.abs(wbMeas - 224) < 0.1,
+      `한쪽 모터만 돌려 차체가 레일에 기대 돌아갈 때 앞·뒤 축 가이드 위치에서 역산: ${wbMeas.toFixed(2)} mm (${wbs.length}프레임, ${Math.min(...wbs).toFixed(2)}~${Math.max(...wbs).toFixed(2)})`);
+    measured.wheelbaseMm = wbMeas;
+  }
+  // sensor positions = where the sensor is when it switches on an edge, minus the motor-axle position then
+  const sensMeas = rg.sensors.map((sn) => {
     const e = ev(sn.port).filter((q) => q.b === blackLv);
     const offs = e.map((q) => q.c - xAt(q.t));
     const off = offs.reduce((a, b) => a + b, 0) / offs.length;
-    return { port: sn.port, axle: sn.axle, off, fromAxle: off - sn.axleS, fromWheelFront: off - sn.axleS - rg.r, n: offs.length, spread: Math.max(...offs) - Math.min(...offs) };
+    return { port: sn.port, axle: sn.axle, off, n: offs.length, spread: Math.max(...offs) - Math.min(...offs) };
   });
   measured.sensors = sensMeas;
-  const nm = { front: '앞바퀴', rear: '뒷바퀴' };
-  check('치수', 'IR 센서 위치 (각 바퀴 앞끝에서 2cm)', sensMeas.every((m) => Math.abs(m.fromWheelFront - 20) < 0.05),
-    sensMeas.map((m) => `${m.port}번: ${nm[m.axle]}축 +${m.fromAxle.toFixed(2)} mm = 바퀴 앞끝 +${m.fromWheelFront.toFixed(2)} mm (검정 진입 ${m.n}회 평균, 모터축 기준 ${m.off >= 0 ? '+' : ''}${m.off.toFixed(2)} mm)`).join(' · '));
+  const s4m = sensMeas[0], s5m = sensMeas[1];
+  const s5FromRear = s5m.off + measured.wheelbaseMm; // rear axle = motor axle - wheelbase
+  check('치수', '⑦ 4번 센서: 모터축 바퀴 축 중심에서 6.5cm', Math.abs(s4m.off - 65) < 0.05,
+    `선 검정 진입 ${s4m.n}회에서 센서 위치 − 모터축 위치 = +${s4m.off.toFixed(2)} mm (편차 ${s4m.spread.toFixed(3)} mm, 응답지연 0.3 ms만큼 −0.01 mm). 시작 시 경기장 끝에서 ${(270 + s4m.off).toFixed(1)} mm`);
+  check('치수', '⑧ 5번 센서: 뒷바퀴축 축 중심에서 8.5cm', Math.abs(s5FromRear - 85) < 0.1,
+    `센서 위치 − 모터축 위치 = ${s5m.off.toFixed(2)} mm (검정 진입 ${s5m.n}회) → 뒷바퀴축(모터축 −${measured.wheelbaseMm.toFixed(2)})에서 +${s5FromRear.toFixed(2)} mm. 시작 시 경기장 끝에서 ${(270 + s5m.off).toFixed(1)} mm (0번 선 150 mm보다 ${(150 - 270 - s5m.off).toFixed(1)} mm 뒤)`);
 
   // centre rail: same disturbances with the rail on and off
   const DIST = {
