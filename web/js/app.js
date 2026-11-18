@@ -3,7 +3,7 @@
 import { View3D } from './view3d.js';
 import { ChartGroup } from './charts.js';
 import { F, FRAME_SIZE } from './sim-host.js';
-import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry, PARAMS_VERSION, MIGRATE_KEYS } from './params.js';
+import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry, robotGeometry, PARAMS_VERSION, migrateParams } from './params.js';
 import { analyseRun } from './analysis.js';
 import { readZip, writeZip, decodeText } from './zip.js';
 import { locateSketch } from './sketch-build.js';
@@ -39,11 +39,8 @@ const state = {
 function loadParams() {
   const p = defaultParams();
   try {
-    const saved = JSON.parse(localStorage.getItem('wafersim.params') || '{}');
-    const from = Number(saved._v || 1);
-    const stale = new Set();
-    for (let v = from + 1; v <= PARAMS_VERSION; v++) for (const k of MIGRATE_KEYS[v] || []) stale.add(k);
-    for (const [k, v] of Object.entries(saved)) if (k in p && !stale.has(k)) p[k] = v;
+    const saved = migrateParams(JSON.parse(localStorage.getItem('wafersim.params') || '{}'));
+    for (const [k, v] of Object.entries(saved)) if (k in p) p[k] = v;
   } catch {}
   return p;
 }
@@ -82,10 +79,10 @@ charts.add({
   ],
 });
 charts.add({
-  title: '위치 (구동축 기준, mm)',
+  title: '위치 (경기장 시작 끝 기준, mm)',
   series: [
-    { key: 'x', label: '구동축', color: '#3ccf7e', width: 1.8 },
-    { key: 's5', label: '5번 센서', color: '#c792ea', fn: (d, b) => d[b + F.x] + Number((state.paramsAtRun || state.params)['sensor.1.offsetMm']) },
+    { key: 'x', label: '모터축', color: '#3ccf7e', width: 1.8 },
+    { key: 's5', label: '5번 센서', color: '#c792ea', fn: (d, b) => d[b + F.x] + robotGeometry(state.paramsAtRun || state.params).sensors[1].s },
   ],
   bands: () => geoNow().lines,
 });
@@ -97,6 +94,14 @@ charts.add({
     { key: 'sB', label: '5번 센서', color: '#c792ea', fn: (d, b) => 2.0 + d[b + F.sB] * 0.9 },
     { key: 'mode1', label: '모드(0코스트 2브레이크 3속도)', color: '#f2c14e', fn: (d, b) => Math.max(0, d[b + F.mode1]) * 0.6 },
     { key: 'led0', label: '빨간 LED', color: '#ff3b30', fn: (d, b) => (d[b + F.led0] ? 1.6 : 1.2) },
+  ],
+});
+charts.add({
+  title: '가운데 레일 (가이드 롤러 좌우 편차 mm · 접촉력 N)',
+  series: [
+    { key: 'guideF', label: '앞 가이드 편차', color: '#4fa3ff' },
+    { key: 'guideR', label: '뒤 가이드 편차', color: '#3ccf7e' },
+    { key: 'railF', label: '레일 접촉력 (N)', color: '#ff6b6b' },
   ],
 });
 charts.add({
@@ -581,7 +586,8 @@ const MODE = { '-1': '비활성', 0: '코스트(파워0)', 1: '파워', 2: '브�
 function renderHud(f, p) {
   if (!f) { $('hud').innerHTML = '<span class="k">상태</span>실행 전'; return; }
   const geo = fieldGeometry(p);
-  const s5 = f[F.x] + Number(p['sensor.1.offsetMm']);
+  const rg = robotGeometry(p);
+  const s5 = f[F.x] + rg.sensors[1].s;
   let li = 0, bd = Infinity;
   geo.lines.forEach((c, i) => { if (Math.abs(s5 - c) < bd) { bd = Math.abs(s5 - c); li = i; } });
   const err = s5 - geo.lines[li];
@@ -594,7 +600,8 @@ function renderHud(f, p) {
     `<div><span class="k">모터1</span>${MODE[f[F.mode1]] ?? f[F.mode1]} · 명령 ${cmd} · 실제 ${f[F.w1].toFixed(0)} deg/s</div>` +
     `<div><span class="k">센서</span>${dot(f[F.sA])}${p['sensor.0.port']}번 ${dot(f[F.sB])}${p['sensor.1.port']}번</div>` +
     `<div><span class="k">5번 센서</span>라인 ${li} ${err >= 0 ? '+' : ''}${err.toFixed(1)} mm</div>` +
-    `<div><span class="k">구동축</span>${f[F.x].toFixed(1)} mm</div>` +
+    `<div><span class="k">모터축</span>${f[F.x].toFixed(1)} mm (앞끝 여유 ${(geo.length - f[F.x] - rg.frontEnd).toFixed(1)} mm)</div>` +
+    `<div><span class="k">레일</span>좌우 ${Number.isFinite(f[F.y]) ? f[F.y].toFixed(2) : '0.00'} mm · 접촉력 ${Number.isFinite(f[F.railF]) ? f[F.railF].toFixed(1) : '0.0'} N</div>` +
     `<div><span class="k">Z / 손목</span>${f[F.z].toFixed(1)} mm / ${f[F.wrist].toFixed(0)}</div>` +
     `<div><span class="k">루프 주기</span>${f[F.loops] ? (Number((p['run.frameMs'] ?? 5)) / f[F.loops]).toFixed(2) + ' ms' : '— (블로킹 중)'}</div>`;
 }
@@ -654,14 +661,14 @@ function renderAnalysis() {
     card(`${a.score.lineScore}점`, '라인·복귀 예상 점수 (참고)') +
     card(s.collisions ? `<span class="bad">${s.collisions}</span>` : '0', '경기장 끝 충돌') +
     '</div>';
-  h += '<h3>정지 위치 (라인 중심 대비 센서 오차 mm, +는 4번 라인 쪽 · −는 시작 쪽)</h3><table><tr><th>#</th><th>시각</th><th>방향</th><th>라인</th><th>5번 센서</th><th>4번 센서</th><th>구동축 위치</th><th>정지 유지</th><th>바퀴 전부 시작구역</th></tr>';
+  h += '<h3>정지 위치 (라인 중심 대비 센서 오차 mm, +는 4번 라인 쪽 · −는 시작 쪽)</h3><table><tr><th>#</th><th>시각</th><th>방향</th><th>라인</th><th>5번 센서</th><th>4번 센서</th><th>모터축 위치</th><th>앞끝/뒤끝 여유</th><th>정지 유지</th><th>바퀴 전부 시작구역</th></tr>';
   a.stops.forEach((st, k) => {
     const e5 = st.sensorErr[1], e4 = st.sensorErr[0];
     const ref5 = st.refSensor === 1;  // which sensor was actually on a line
     const cls = (e, isRef) => (!isRef ? 'note' : Math.abs(e) <= a.geo.width / 2 ? 'ok' : Math.abs(e) <= 20 ? 'warn' : 'bad');
     h += `<tr class="click" data-t="${st.t}"><td>${k + 1}</td><td>${(st.t / 1000).toFixed(2)}s</td><td>${st.dir > 0 ? '전진' : '후진'}</td><td>${st.nearestLine}</td>` +
       `<td class="${cls(e5, ref5)}">L${st.sensorLine[1]} ${e5 >= 0 ? '+' : ''}${e5.toFixed(1)}</td><td class="${cls(e4, !ref5)}">L${st.sensorLine[0]} ${e4 >= 0 ? '+' : ''}${e4.toFixed(1)}</td>` +
-      `<td>${st.axle.toFixed(1)} mm</td><td>${(st.duration / 1000).toFixed(2)}s</td><td>${st.inStartZone ? '<span class="ok">예</span>' : '아니오'}</td></tr>`;
+      `<td>${st.axle.toFixed(1)} mm</td><td class="${st.frontGap < 1 || st.rearGap < 1 ? 'bad' : ''}">${st.frontGap.toFixed(1)} / ${st.rearGap.toFixed(1)} mm</td><td>${(st.duration / 1000).toFixed(2)}s</td><td>${st.inStartZone ? '<span class="ok">예</span>' : '아니오'}</td></tr>`;
   });
   h += '</table>';
   h += '<h3>예상 점수 (대회 규정 V1.3 배점, 시뮬레이션 기준 참고값)</h3><table><tr><th>항목</th><th>배점</th><th>결과</th></tr>';
@@ -723,7 +730,7 @@ $('selField').onchange = (e) => {
   markParamsDirty();
 };
 $('btnParamsDefault').onclick = () => { if (!confirm('모든 설정을 기본값으로 되돌릴까요?')) return; state.params = defaultParams(); saveParams(); renderParams(); markParamsDirty(); };
-$('btnParamsExport').onclick = () => download(new Blob([JSON.stringify(state.params, null, 2)], { type: 'application/json' }), 'wafersim-settings.json');
+$('btnParamsExport').onclick = () => download(new Blob([JSON.stringify({ ...state.params, _v: PARAMS_VERSION }, null, 2)], { type: 'application/json' }), 'wafersim-settings.json');
 $('btnParamsImport').onclick = () => $('inpParams').click();
 $('inpParams').onchange = async (e) => {
   const f = e.target.files[0];
@@ -731,7 +738,10 @@ $('inpParams').onchange = async (e) => {
   try {
     const obj = JSON.parse(await f.text());
     const p = defaultParams();
-    for (const [k, v] of Object.entries(obj)) if (k in p) p[k] = v;
+    // an exported field choice is explicit, keep it; robot geometry from older versions is outdated
+    const kept = migrateParams(obj);
+    for (const [k, v] of Object.entries(obj)) if (k.startsWith('field.') && k in p) kept[k] = v;
+    for (const [k, v] of Object.entries(kept)) if (k in p) p[k] = v;
     state.params = p;
     saveParams();
     renderParams();

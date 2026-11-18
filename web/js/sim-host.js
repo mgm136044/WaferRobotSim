@@ -2,6 +2,8 @@
 // and turns the runtime callbacks into serial lines, frames and events.
 // Works in a Web Worker and in Node.
 
+import { resolveParams } from './params.js';
+
 export class ExitSignal extends Error {
   constructor(code, t, reason) {
     super(reason);
@@ -14,12 +16,18 @@ export class ExitSignal extends Error {
 export const FRAME_FIELDS = [
   't', 'x', 'v', 'cmd1', 'cmd2', 'w1', 'w2', 'mode1', 'mode2', 'duty1', 'duty2', 'enc1', 'enc2', 'sA', 'sB',
   'z', 'j1', 'j2', 'wrist', 'led0', 'led1', 'led2', 'loops', 'sreads', 'i2c', 'can', 'slip1', 'slip2', 'coll',
-  'startLed', 'wristTarget', 'ref1', 'ref2', 'amp1', 'amp2', 'j1t', 'j2t', 'sC', 'sD', 'spare',
+  'startLed', 'wristTarget', 'ref1', 'ref2', 'amp1', 'amp2', 'j1t', 'j2t', 'sC', 'sD',
+  'y', 'yaw', 'railF', 'guideF', 'guideR',
 ];
-export const FRAME_SIZE = 40;
+// y = sideways offset of the motor axle from the centre rail (mm, left +), yaw (deg),
+// railF = total rail contact force (N), guideF/guideR = front/rear guide offset from the rail (mm)
+export const FRAME_SIZE = 44;
 export const F = Object.fromEntries(FRAME_FIELDS.map((k, i) => [k, i]));
 
-export function createHost({ params = {}, onSerial, onFrame, onEvent, onTick }) {
+export function createHost({ params: rawParams = {}, onSerial, onFrame, onEvent, onTick }) {
+  // derived geometry (geom.*) is computed here so every caller (browser worker, CLI,
+  // verification) feeds the runtime the same numbers the 3D view and analysis use
+  const params = 'geom.mmPerRev' in rawParams ? rawParams : resolveParams(rawParams);
   let memory = null;
   const dec = new TextDecoder();
   const enc = new TextEncoder();

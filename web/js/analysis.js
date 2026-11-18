@@ -1,17 +1,18 @@
 // Post-run analysis: stops vs. lines, legs, LED blinks and a reference score estimate
 // following the 2026 rules (V1.3) line/return items. Wafer items need the real arm.
 import { F } from './sim-host.js';
-import { fieldGeometry } from './params.js';
+import { fieldGeometry, robotGeometry } from './params.js';
 
 const RED = 0xff0000;
 
 export function analyseRun(frames, serial, events, params) {
   const geo = fieldGeometry(params);
-  const sensorOffsets = [Number(params['sensor.0.offsetMm']), Number(params['sensor.1.offsetMm'])];
-  const sensorPorts = [Number(params['sensor.0.port']), Number(params['sensor.1.port'])];
-  const rear = Number(params['robot.rearOverhangMm']);
-  const frontAxle = Number(params['robot.frontAxleMm']);
+  const rg = robotGeometry(params);
+  const sensorOffsets = rg.sensors.map((s) => s.s);
+  const sensorPorts = rg.sensors.map((s) => s.port);
   const startZone = geo.startZone;
+  // all four wheels inside the green start zone (motor axle position -> wheel edges)
+  const wheelsInStart = (axle) => axle + rg.rearAxle - rg.r >= 0 && axle + rg.frontAxle + rg.r <= startZone;
   const n = frames.length;
   const stops = [];
   const legs = [];
@@ -63,7 +64,9 @@ export function analyseRun(frames, serial, events, params) {
           sensorErr: sensorPos.map((p) => p - geo.lines[nearestLine(p)]),
           sensorLine: sensorPos.map((p) => nearestLine(p)),
           axleErr: axle - geo.lines[nearestLine(axle)],
-          inStartZone: axle - 0 >= 0 && axle + frontAxle <= startZone && axle - 0 <= startZone,
+          inStartZone: wheelsInStart(axle),
+          frontGap: geo.length - (axle + rg.frontEnd),
+          rearGap: axle + rg.rearEnd,
           duration: 0,
           dir: legDir,
         };
@@ -113,7 +116,7 @@ export function analyseRun(frames, serial, events, params) {
   const last = stops[stops.length - 1];
   const lastStill = last && Math.abs(frames[n - 1][F.v]) < 1.5;
   const returnBlinks = last ? blinks.filter((t) => t >= last.t).length : 0;
-  const allWheelsIn = last ? last.axle + frontAxle <= startZone : false;
+  const allWheelsIn = last ? wheelsInStart(last.axle) : false;
   items.push({ label: '시작 구역 복귀 + 빨간 LED 3회', points: 5, ok: !!(last && lastStill && allWheelsIn && returnBlinks >= 3), detail: { allWheelsIn, returnBlinks } });
   const lineScore = items.reduce((a, it) => a + (it.ok ? it.points : 0), 0);
 
@@ -122,6 +125,19 @@ export function analyseRun(frames, serial, events, params) {
   for (const s of serial) {
     const m = s.text.match(/^(BASE_[A-Z_]+|FINISH_[A-Z_]+|SCORING_[A-Z_]+|REVERSE_[A-Z_]+|MISSION_[A-Z_]+|ARM_START_FAILED|CONFIG_[A-Z_]+)/);
     if (m) markers.push({ t: s.t, tag: m[1], text: s.text.trim() });
+  }
+
+  // body clearance to the field ends and centre-rail guidance over the whole run
+  let minFront = Infinity, minRear = Infinity, maxGuide = 0, maxRailF = 0, maxYaw = 0, maxY = 0;
+  for (const f of frames) {
+    minFront = Math.min(minFront, geo.length - (f[F.x] + rg.frontEnd));
+    minRear = Math.min(minRear, f[F.x] + rg.rearEnd);
+    if (F.guideF !== undefined) {
+      maxGuide = Math.max(maxGuide, Math.abs(f[F.guideF]), Math.abs(f[F.guideR]));
+      maxRailF = Math.max(maxRailF, f[F.railF]);
+      maxYaw = Math.max(maxYaw, Math.abs(f[F.yaw]));
+      maxY = Math.max(maxY, Math.abs(f[F.y]));
+    }
   }
 
   const tEnd = frames[n - 1][F.t];
@@ -145,6 +161,11 @@ export function analyseRun(frames, serial, events, params) {
       redBlinks: blinks.length,
       lineScoreEstimate: lineScore,
       collisions: events.filter((e) => e.type === 3).length,
+      minFrontGapMm: +minFront.toFixed(1),
+      minRearGapMm: +minRear.toFixed(1),
+      maxGuideOffsetMm: +maxGuide.toFixed(3),
+      maxRailForceN: +maxRailF.toFixed(2),
+      maxYawDeg: +maxYaw.toFixed(4),
       warnings: events.filter((e) => e.type === 1 || e.type === 5).length,
     },
   };
