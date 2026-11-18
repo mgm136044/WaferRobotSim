@@ -3,12 +3,12 @@
 
 export const FIELD_PRESETS = {
   measured: {
-    label: '실측 (라인 사이 470 / 선 폭 10 / 끝 150 mm)',
+    label: '실측 (라인 사이 360 / 선 폭 10 / 끝 163 mm, 전장 1816)',
     'field.lineCount': 5,
-    'field.firstGapMm': 150,
-    'field.gapMm': 470,
+    'field.firstGapMm': 163,
+    'field.gapMm': 360,
     'field.lineWidthMm': 10,
-    'field.lastGapMm': 150,
+    'field.lastGapMm': 163,
   },
   rules: {
     label: '대회 규정 V1.3 도면 (선 간격 370 mm, 전장 1860 mm)',
@@ -24,10 +24,10 @@ export const FIELD_PRESETS = {
 export const PARAM_SPECS = [
   // field
   ['field.lineCount', 5, '라인 수', '개', '경기장', '0~4번 라인'],
-  ['field.firstGapMm', 150, '0번 앞 흰 구간', 'mm', '경기장', '팀 실측 15cm (시작 끝 → 0번 선)'],
-  ['field.gapMm', 470, '라인 사이 흰 구간', 'mm', '경기장', '실측: 라인과 라인 사이 47cm (선 중심 간격 480)'],
+  ['field.firstGapMm', 163, '0번 앞 흰 구간', 'mm', '경기장', '실측 16.3cm (시작 끝 → 0번 선, 흰색만)'],
+  ['field.gapMm', 360, '라인 사이 흰 구간', 'mm', '경기장', '실측 36cm (검은 선 제외 흰색만) → 선 중심 간격 370'],
   ['field.lineWidthMm', 10, '검은 선 폭', 'mm', '경기장', '실측 1cm'],
-  ['field.lastGapMm', 150, '4번 뒤 흰 구간', 'mm', '경기장', '팀 실측 15cm (4번 선 → 끝)'],
+  ['field.lastGapMm', 163, '4번 뒤 흰 구간', 'mm', '경기장', '실측 16.3cm (4번 선 → 끝, 흰색만). 전장 1816'],
   ['field.startZoneMm', 500, '시작 구역 길이', 'mm', '경기장', '규정: 500×500 초록 시작 구역'],
   ['field.workWidthMm', 900, '작업 영역 폭', 'mm', '경기장', '규정 900mm. 차체가 옆으로 이 밖에 나가면 경고'],
 
@@ -125,12 +125,14 @@ export const PARAM_SPECS = [
   ['cpu.loopUs', 3, 'loop() 사이 오버헤드', 'µs', '실행', ''],
 ];
 
-export const PARAMS_VERSION = 4;
+export const PARAMS_VERSION = 5;
 // keys whose defaults changed (2: arm faces the field, 3: measured robot geometry + centre rail)
 export const MIGRATE_KEYS = {
   2: ['viz.armZeroDeg', 'viz.armBaseMm', 'viz.j1Sign', 'viz.wristSign'],
   3: ['robot.rearOverhangMm', 'robot.startAxleMm', 'robot.lengthMm', 'viz.armBaseMm', 'field.gapMm', 'field.lineWidthMm', 'field.firstGapMm', 'field.lastGapMm', 'field.lineCount'],
   4: ['robot.wheelbaseMm', 'robot.motorAxle', 'sensor.0.axle', 'sensor.1.axle', 'drive.wheelDiameterMm', 'robot.rearOverhangMm', 'robot.startAxleMm'],
+  // 5: new field measurement (white 360 / ends 163 / line 10); the 470/150 values are withdrawn
+  5: ['field.gapMm', 'field.firstGapMm', 'field.lastGapMm', 'field.lineWidthMm', 'field.lineCount', 'robot.wheelbaseMm', 'robot.rearOverhangMm', 'drive.wheelDiameterMm', 'sensor.0.fromAxleMm', 'sensor.1.fromAxleMm', 'sensor.0.axle', 'sensor.1.axle', 'robot.motorAxle'],
 };
 // drop values that an older version saved/exported for keys whose meaning or default changed.
 // `dropped` (optional array) receives the keys that were replaced so the UI can tell the user.

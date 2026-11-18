@@ -752,7 +752,7 @@ $('inpParams').onchange = async (e) => {
     // an exported field choice is explicit, keep it; robot geometry from older versions is outdated
     const dropped = [];
     const kept = migrateParams(obj, dropped);
-    for (const [k, v] of Object.entries(obj)) if (k.startsWith('field.') && k in p) kept[k] = v;
+    if (Number(obj._v) >= 5) for (const [k, v] of Object.entries(obj)) if (k.startsWith('field.') && k in p) kept[k] = v;
     for (const [k, v] of Object.entries(kept)) if (k in p) p[k] = v;
     const really = dropped.filter((k) => !k.startsWith('field.') && k in p);
     if (really.length) alert(`이전 버전 설정 파일이라 로봇 형상 값 ${really.length}개는 지금 실측값으로 바꿨습니다:\n` + really.map((k) => `- ${paramLabel(k)}: ${obj[k]} → ${p[k]}`).join('\n'));
