@@ -3,7 +3,7 @@
 import { View3D } from './view3d.js';
 import { ChartGroup } from './charts.js';
 import { F, FRAME_SIZE } from './sim-host.js';
-import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry } from './params.js';
+import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry, PARAMS_VERSION, MIGRATE_KEYS } from './params.js';
 import { analyseRun } from './analysis.js';
 import { readZip, writeZip, decodeText } from './zip.js';
 import { locateSketch } from './sketch-build.js';
@@ -40,11 +40,14 @@ function loadParams() {
   const p = defaultParams();
   try {
     const saved = JSON.parse(localStorage.getItem('wafersim.params') || '{}');
-    for (const [k, v] of Object.entries(saved)) if (k in p) p[k] = v;
+    const from = Number(saved._v || 1);
+    const stale = new Set();
+    for (let v = from + 1; v <= PARAMS_VERSION; v++) for (const k of MIGRATE_KEYS[v] || []) stale.add(k);
+    for (const [k, v] of Object.entries(saved)) if (k in p && !stale.has(k)) p[k] = v;
   } catch {}
   return p;
 }
-function saveParams() { localStorage.setItem('wafersim.params', JSON.stringify(state.params)); }
+function saveParams() { localStorage.setItem('wafersim.params', JSON.stringify({ ...state.params, _v: PARAMS_VERSION })); }
 
 const DB = (() => {
   let dbp = null;

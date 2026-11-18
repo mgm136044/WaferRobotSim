@@ -83,9 +83,9 @@ export const PARAM_SPECS = [
   ['servo.maxRate', 240, '손목 최대 속도', '명령단위/s', '팔·Z', '가정값'],
 
   // arm visualisation only (does not change timing)
-  ['viz.armBaseMm', 330, '팔 회전축 위치(구동축 기준)', 'mm', '시각화(팔)', '3D 표시용 가정값'],
-  ['viz.armZeroDeg', 180, '팔 0점 방향', 'deg', '시각화(팔)', '0=전진 방향, 180=후진 방향'],
-  ['viz.j1Sign', -1, '관절 부호', '', '시각화(팔)', '+1 또는 −1 (양수 각도가 초록 트레이 쪽)'],
+  ['viz.armBaseMm', 180, '팔 회전축 위치(구동축 기준)', 'mm', '시각화(팔)', '3D 표시용 가정값 (0번 선 정지 시 축이 0·1번 트레이 사이)'],
+  ['viz.armZeroDeg', 0, '팔 0점 방향', 'deg', '시각화(팔)', '0=경기장 쪽(전진 방향), 180=시작 끝 쪽'],
+  ['viz.j1Sign', -1, '관절 부호', '', '시각화(팔)', '+1 또는 −1 (1번 트레이 삽입이 오른쪽 줄 트레이로 향함)'],
   ['viz.wristSign', -1, '손목 부호', '', '시각화(팔)', '+1 또는 −1'],
   ['viz.unitsPer90', 25000, '90°당 드라이브 단위', 'unit', '시각화(팔)', '교육자료: 각도 = 펄스 × 90 / 25000'],
   ['viz.link1Mm', 232.5, '1번 링크', 'mm', '시각화(팔)', 'CONTEXT.md 실측'],
@@ -103,6 +103,10 @@ export const PARAM_SPECS = [
   ['cpu.millisUs', 1, 'millis() 호출 비용', 'µs', '실행', '빈 루프가 시간을 소모하도록'],
   ['cpu.loopUs', 3, 'loop() 사이 오버헤드', 'µs', '실행', ''],
 ];
+
+export const PARAMS_VERSION = 2;
+// keys whose defaults changed in PARAMS_VERSION 2 (arm now faces the field)
+export const MIGRATE_KEYS = { 2: ['viz.armZeroDeg', 'viz.armBaseMm', 'viz.j1Sign', 'viz.wristSign'] };
 
 export function defaultParams() {
   const p = {};

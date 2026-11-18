@@ -171,7 +171,7 @@ export class View3D {
       this.sensorMeshes.push(s);
     }
     // Z column + SCARA arm (visual only; kinematics assumptions in settings)
-    const baseZ = Number(p['viz.armBaseMm'] ?? 330);
+    const baseZ = Number(p['viz.armBaseMm'] ?? 180);
     const colH = 760;
     const column = new THREE.Mesh(new THREE.BoxGeometry(60, colH, 60), mat(COLORS.column, { metalness: 0.4 }));
     column.position.set(0, 100 + colH / 2, baseZ);
@@ -251,7 +251,7 @@ export class View3D {
     const unitsPer90 = Number(p['viz.unitsPer90'] ?? 25000);
     const sign = Number(p['viz.j1Sign'] ?? -1);
     const wsign = Number(p['viz.wristSign'] ?? -1);
-    const zero = (Number(p['viz.armZeroDeg'] ?? 180) * Math.PI) / 180;
+    const zero = (Number(p['viz.armZeroDeg'] ?? 0) * Math.PI) / 180;
     const a1 = sign * (f[F.j1] / unitsPer90) * (Math.PI / 2);
     const a2 = sign * (f[F.j2] / unitsPer90) * (Math.PI / 2);
     this.j1.rotation.y = zero + a1;
