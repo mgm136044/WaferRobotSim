@@ -347,7 +347,18 @@ static inline void clamp_circle(double &fx, double &fy, double fmax) {
   if (mag > fmax && mag > 0) { fx *= fmax / mag; fy *= fmax / mag; }
 }
 
-void world_step(double dt) {
+// The motor shaft is coupled to the chassis through the tyre (stiffness tire_k). Reflected to
+// the shaft this is tire_k * r^2 / J; with a large wheel radius per motor radian (e.g. an
+// 80T -> 40T step-up gear) explicit integration at 100 us would oscillate, so the chassis/motor
+// dynamics are split into enough sub-steps to keep dt * k <= 0.5. Normal gearing uses 1.
+static int chassis_substeps(double dt) {
+  const double r = r_eff();
+  const double k = prm.tire_k * r * r / prm.rotor_J + prm.tire_k / prm.mass;
+  const int n = (int)ceil(dt * k / 0.5);
+  return n < 1 ? 1 : (n > 64 ? 64 : n);
+}
+
+static void chassis_step(double dt) {
   const double r = r_eff();
   const double g = 9.81;
   double tau[4];
@@ -481,6 +492,11 @@ void world_step(double dt) {
     }
   }
 
+}
+
+void world_step(double dt) {
+  const int n = chassis_substeps(dt);
+  for (int i = 0; i < n; ++i) chassis_step(dt / n);
   update_sensors();
   servo_step(dt);
   can_step(dt);
