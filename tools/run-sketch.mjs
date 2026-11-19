@@ -75,7 +75,7 @@ const report = analyseRun(frames, serial, events, resolveParams(params));
 console.log(JSON.stringify(report.summary, null, 1));
 for (const s of report.stops) console.log(`stop @${(s.t / 1000).toFixed(2)}s line~${s.nearestLine} axle=${s.axle.toFixed(1)}mm s5err=${s.sensorErr[1]?.toFixed(1)} s4err=${s.sensorErr[0]?.toFixed(1)} front=${s.frontGap.toFixed(1)} rear=${s.rearGap.toFixed(1)} dur=${s.duration}ms`);
 if (csv) {
-  const head = ['t', 'x', 'v', 'cmd1', 'w1', 'w2', 'mode1', 'sA', 'sB', 'z', 'j1', 'j2', 'wrist', 'y', 'yaw', 'railF', 'guideF', 'guideR'];
+  const head = ['t', 'x', 'v', 'cmd1', 'w1', 'w2', 'mode1', 'sA', 'sB', 'z', 'j1', 'j2', 'wrist', 'y', 'yaw', 'railF', 'guideF', 'guideR', 'enc1', 'slip1', 'slip2'];
   const lines = [head.join(',')];
   for (const f of frames) lines.push(head.map((k) => f[F[k]]).join(','));
   fs.writeFileSync(csv, lines.join('\n'));

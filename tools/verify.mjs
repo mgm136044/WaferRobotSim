@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { prepareBuild, toTree, locateSketch } from '../web/js/sketch-build.js';
 import { runSketch, F, FRAME_SIZE } from '../web/js/sim-host.js';
-import { defaultParams, fieldGeometry, applyFieldPreset, FIELD_PRESETS, robotGeometry, resolveParams } from '../web/js/params.js';
+import { defaultParams, fieldGeometry, applyFieldPreset, FIELD_PRESETS, robotGeometry, resolveParams, applyGearPreset, GEAR_PRESETS } from '../web/js/params.js';
 import { analyseRun } from '../web/js/analysis.js';
 import { readZip, decodeText } from '../web/js/zip.js';
 
@@ -416,6 +416,20 @@ void loop() {}
   const rFree = await run(c.wasm, { ...params, 'robot.rollResistN': 0, 'robot.rollViscous': 0 });
   const wFree = wheelFrom(rFree), wLoad = wheelFrom(r);
   measured.wheel = { free: wFree, loaded: wLoad };
+  // gear selection: the same sweep with each preset, rolling without load (pure kinematics)
+  const gearRes = {};
+  for (const name of Object.keys(GEAR_PRESETS)) {
+    const pg = applyGearPreset({ ...params, 'robot.rollResistN': 0, 'robot.rollViscous': 0 }, name);
+    const rgg = robotGeometry(pg);
+    const rr = await run(c.wasm, pg);
+    const xa = (t, key = F.x) => { const i = rr.frames.findIndex((f) => f[F.t] >= t); const a0 = rr.frames[i - 1], b0 = rr.frames[i], w = (t - a0[F.t]) / (b0[F.t] - a0[F.t]); return a0[key] + (b0[key] - a0[key]) * w; };
+    const t1 = 4000, t2 = name === '80-40' ? 9000 : 30000;  // faster gear reaches the far end sooner
+    const dX = xa(t2) - xa(t1), motorRevs = (xa(t2, F.enc1) - xa(t1, F.enc1)) / 1440;
+    gearRes[name] = { teeth: `${rgg.motorT}→${rgg.wheelT}`, perMotorRev: dX / motorRevs, perWheelRev: dX / (motorRevs / rgg.G), expect: rgg.mmPerRev, speed: Math.max(...rr.frames.map((f) => f[F.v])) };
+  }
+  measured.gears = gearRes;
+  check('구동', '기어 구성 선택 (모터 40T→80T / 80T→40T)', Object.values(gearRes).every((g) => Math.abs(g.perMotorRev - g.expect) < 0.05 && Math.abs(g.perWheelRev - Math.PI * 103) < 0.05),
+    Object.values(gearRes).map((g) => `${g.teeth}: 모터 1회전 ${g.perMotorRev.toFixed(2)} mm (기대 ${g.expect.toFixed(2)}), 바퀴 1회전 ${g.perWheelRev.toFixed(2)} mm, 100 deg/s 명령 속도 ${g.speed.toFixed(1)} mm/s`).join(' · '));
   check('치수', '④ 모터축 바퀴 지름 10.3cm [이동거리 ÷ 회전수, 운동 측정]', Math.abs(wFree.dMeas - 103) < 0.01 && Math.abs(wLoad.dMeas - 103) < 0.5,
     `${((tB - tA) / 1000)}초 등속 구간에서 차체 이동 ÷ (엔코더 회전 ÷ 기어 ${rg.G}): 미끄럼 없는 조건 ${wFree.dX.toFixed(2)} mm / 바퀴 ${wFree.wheelRevs.toFixed(4)}회전 → 1회전 ${wFree.perRev.toFixed(2)} mm, 지름 ${wFree.dMeas.toFixed(3)} mm. 기본 설정(구름 저항 있음)은 타이어 미끄럼 때문에 1회전 ${wLoad.perRev.toFixed(2)} mm (지름 환산 ${wLoad.dMeas.toFixed(2)} mm, −${((1 - wLoad.dMeas / 103) * 100).toFixed(2)}%)`);
   // start position
@@ -520,6 +534,22 @@ void loop() {}
     check('레일', '팀 코드 미션 중 레일 안내 (좌우 바퀴 1% 차이)', /MISSION_DONE/.test(txt) && a.summary.stopLines === mission.analysis.summary.stopLines && a.summary.maxGuideOffsetMm < clr + 0.3,
       `정지 순서 ${a.summary.stopLines} (차이 없을 때와 동일), 가이드 편차 최대 ${a.summary.maxGuideOffsetMm.toFixed(2)} mm, 접촉력 최대 ${a.summary.maxRailForceN.toFixed(1)} N, 회전 최대 ${a.summary.maxYawDeg.toFixed(2)}°, 미션 ${a.summary.missionSeconds} s`);
   }
+}
+
+// ============================================================ team mission with the alternative gear (80T -> 40T)
+if (teamFiles) {
+  const cc = await compile(teamFiles);
+  const pr = applyGearPreset(defaultParams(), '80-40');
+  const rr = await run(cc.wasm, pr);
+  const a = analyseRun(rr.frames, rr.serial, rr.events, resolveParams(pr));
+  const txt = rr.serial.map((q) => q.text).join('');
+  const done = /MISSION_DONE/.test(txt);
+  const faults = (txt.match(/^.*(FAULT|ABORT|TIMEOUT).*$/gm) || []).slice(0, 3);
+  measured.gear8040 = { summary: a.summary, stops: a.stops.map((s) => ({ line: s.nearestLine, axle: s.axle, e5: s.sensorErr[1], e4: s.sensorErr[0], front: s.frontGap, rear: s.rearGap })), done, faults, events: rr.events.filter((e) => e.type === 3 || e.type === 1).map((e) => `${(e.t / 1000).toFixed(2)}s ${e.text}`) };
+  const same = done && a.summary.stopLines === mission.analysis.summary.stopLines && a.summary.collisions === 0;
+  check('구동', '팀 코드 그대로 + 기어 80T→40T 미션 (참고)', same ? true : null,
+    `${done ? `MISSION_DONE ${(rr.serial.find((q) => /MISSION_DONE/.test(q.text)).t / 1000).toFixed(1)} s` : 'MISSION_DONE 없음'}, 정지 순서 ${a.summary.stopLines}, 최고 속도 ${a.summary.maxSpeedMmS} mm/s, 끝 벽 접촉 ${a.summary.collisions}회` +
+    (faults.length ? `, 로그: ${faults.join(' / ')}` : '') + (same ? '' : ' → 코드의 속도·감속 설정이 40T→80T 기준이라 조정 필요'));
 }
 
 // ============================================================ before / after comparison
