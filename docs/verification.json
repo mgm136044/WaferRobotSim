@@ -1,6 +1,6 @@
 {
- "generatedAt": "2026-11-18T23:54:57.416Z",
- "runtimeVersion": 1795045931387,
+ "generatedAt": "2026-11-19T05:01:03.846Z",
+ "runtimeVersion": 1795064280100,
  "results": [
   {
    "req": "3",
@@ -12,13 +12,13 @@
    "req": "3",
    "name": "브라우저용 clang으로 컴파일",
    "ok": true,
-   "detail": "7.2초, 오류 0"
+   "detail": "7.7초, 오류 0"
   },
   {
    "req": "3",
    "name": "미션 끝까지 실행 (32장 작업 + 채점 경로)",
    "ok": true,
-   "detail": "MISSION_DONE 212.0초, FAULT/ABORT 0건, 계산 0.8초"
+   "detail": "MISSION_DONE 212.0초, FAULT/ABORT 0건, 계산 0.9초"
   },
   {
    "req": "3",
@@ -217,6 +217,12 @@
    "detail": "0~4번 선 검정 구간 폭 10.00 / 10.00 / 10.00 / 10.00 / 10.00 mm"
   },
   {
+   "req": "구동",
+   "name": "기어 구성 선택 (모터 40T→80T / 80T→40T)",
+   "ok": true,
+   "detail": "40→80: 모터 1회전 161.79 mm (기대 161.79), 바퀴 1회전 323.58 mm, 100 deg/s 명령 속도 34.6 mm/s · 80→40: 모터 1회전 647.17 mm (기대 647.17), 바퀴 1회전 323.58 mm, 100 deg/s 명령 속도 138.4 mm/s"
+  },
+  {
    "req": "치수",
    "name": "④ 모터축 바퀴 지름 10.3cm [이동거리 ÷ 회전수, 운동 측정]",
    "ok": true,
@@ -263,6 +269,12 @@
    "name": "팀 코드 미션 중 레일 안내 (좌우 바퀴 1% 차이)",
    "ok": true,
    "detail": "정지 순서 0 → 1 → 0 → 2 → 0 → 3 → 0 → 4 → 2 → 0 (차이 없을 때와 동일), 가이드 편차 최대 1.13 mm, 접촉력 최대 27.4 N, 회전 최대 0.55°, 미션 208.01 s"
+  },
+  {
+   "req": "구동",
+   "name": "팀 코드 그대로 + 기어 80T→40T 미션 (참고)",
+   "ok": null,
+   "detail": "MISSION_DONE 없음, 정지 순서 0 → 1 → 0 → 3 → 0, 최고 속도 978.2 mm/s, 끝 벽 접촉 2회, 로그: REVERSE_FAULT: line timeout or invalid handoff / SCORING_FAULT: TRAVEL / MOTION_FAULT: BASE_TRAVEL → 코드의 속도·감속 설정이 40T→80T 기준이라 조정 필요"
   },
   {
    "req": "비교",
@@ -323,6 +335,22 @@
     "wheelRevs": 2.6458333333333335,
     "perRev": 322.91686915600394,
     "dMeas": 102.78763186787364
+   }
+  },
+  "gears": {
+   "40-80": {
+    "teeth": "40→80",
+    "perMotorRev": 161.7920269427838,
+    "perWheelRev": 323.5840538855676,
+    "expect": 161.79202165987434,
+    "speed": 34.60551452636719
+   },
+   "80-40": {
+    "teeth": "80→40",
+    "perMotorRev": 647.1680924056412,
+    "perWheelRev": 323.5840462028206,
+    "expect": 647.1680866394973,
+    "speed": 138.42205810546875
    }
   },
   "start": {
@@ -404,6 +432,79 @@
    "maxRailForceN": 27.41,
    "maxYawDeg": 0.5466,
    "warnings": 0
+  },
+  "gear8040": {
+   "summary": {
+    "frames": 55901,
+    "simSeconds": 279.5,
+    "firstMotionS": 3.505,
+    "missionSeconds": null,
+    "stops": 5,
+    "stopLines": "0 → 1 → 0 → 3 → 0",
+    "stopReference": "정지 라인 = 선 위에 있는 센서(4번 또는 5번) 기준",
+    "maxSpeedMmS": 978.2,
+    "redBlinks": 1,
+    "lineScoreEstimate": 20,
+    "collisions": 2,
+    "minFrontGapMm": 473.7,
+    "minRearGapMm": 0,
+    "maxGuideOffsetMm": 0,
+    "maxRailForceN": 0,
+    "maxYawDeg": 0,
+    "warnings": 0
+   },
+   "stops": [
+    {
+     "line": 0,
+     "axle": 306.8069152832031,
+     "e5": -0.193084716796875,
+     "e4": -166.19308471679688,
+     "front": 1299.1930847167969,
+     "rear": 36.806915283203125
+    },
+    {
+     "line": 1,
+     "axle": 695.3890991210938,
+     "e5": 18.38909912109375,
+     "e4": -147.61090087890625,
+     "front": 910.6109008789062,
+     "rear": 425.38909912109375
+    },
+    {
+     "line": 0,
+     "axle": 270,
+     "e5": -37,
+     "e4": 167,
+     "front": 1336,
+     "rear": 0
+    },
+    {
+     "line": 3,
+     "axle": 1132.285888671875,
+     "e5": 85.285888671875,
+     "e4": -80.714111328125,
+     "front": 473.714111328125,
+     "rear": 862.285888671875
+    },
+    {
+     "line": 0,
+     "axle": 270,
+     "e5": -37,
+     "e4": 167,
+     "front": 1336,
+     "rear": 0
+    }
+   ],
+   "done": false,
+   "faults": [
+    "REVERSE_FAULT: line timeout or invalid handoff",
+    "SCORING_FAULT: TRAVEL",
+    "MOTION_FAULT: BASE_TRAVEL"
+   ],
+   "events": [
+    "98.60s rear wall hit at -393 mm/s",
+    "140.60s rear wall hit at -978 mm/s"
+   ]
   }
  },
  "comparison": {
