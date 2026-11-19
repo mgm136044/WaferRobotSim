@@ -3,7 +3,7 @@
 import { View3D } from './view3d.js';
 import { ChartGroup } from './charts.js';
 import { F, FRAME_SIZE } from './sim-host.js';
-import { PARAM_SPECS, FIELD_PRESETS, defaultParams, applyFieldPreset, fieldGeometry, robotGeometry, PARAMS_VERSION, migrateParams, validateParams } from './params.js';
+import { PARAM_SPECS, FIELD_PRESETS, GEAR_PRESETS, defaultParams, applyFieldPreset, applyGearPreset, fieldGeometry, robotGeometry, PARAMS_VERSION, migrateParams, validateParams } from './params.js';
 import { analyseRun } from './analysis.js';
 import { readZip, writeZip, decodeText } from './zip.js';
 import { locateSketch } from './sketch-build.js';
@@ -703,6 +703,10 @@ function renderParams() {
   sel.innerHTML = Object.entries(FIELD_PRESETS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('') + '<option value="custom">사용자 지정</option>';
   const cur = Object.entries(FIELD_PRESETS).find(([, v]) => Object.entries(v).every(([k, val]) => k === 'label' || Number(state.params[k]) === val));
   sel.value = cur ? cur[0] : 'custom';
+  const gsel = $('selGear');
+  gsel.innerHTML = Object.entries(GEAR_PRESETS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('') + '<option value="custom">직접 입력 (아래 잇수)</option>';
+  const gcur = Object.entries(GEAR_PRESETS).find(([, v]) => Number(state.params['drive.motorGearTeeth']) === v['drive.motorGearTeeth'] && Number(state.params['drive.wheelGearTeeth']) === v['drive.wheelGearTeeth']);
+  gsel.value = gcur ? gcur[0] : 'custom';
   const groups = {};
   for (const spec of PARAM_SPECS) (groups[spec[4]] ??= []).push(spec);
   const form = $('paramsForm');
@@ -722,7 +726,7 @@ function renderParams() {
         state.params[key] = isText ? inp.value : Number(inp.value);
         saveParams();
         markParamsDirty();
-        if (key.startsWith('field.')) renderParams();
+        if (key.startsWith('field.') || key.startsWith('drive.') && key.endsWith('GearTeeth')) renderParams();
       };
       div.appendChild(row);
     }
@@ -736,6 +740,13 @@ function markParamsDirty() {
 $('selField').onchange = (e) => {
   if (e.target.value === 'custom') return;
   applyFieldPreset(state.params, e.target.value);
+  saveParams();
+  renderParams();
+  markParamsDirty();
+};
+$('selGear').onchange = (e) => {
+  if (e.target.value === 'custom') return;
+  applyGearPreset(state.params, e.target.value);
   saveParams();
   renderParams();
   markParamsDirty();

@@ -20,6 +20,17 @@ export const FIELD_PRESETS = {
   },
 };
 
+// gear train between the drive motor and the wheel axle (selectable in the settings tab)
+export const GEAR_PRESETS = {
+  '40-80': { label: '모터 40T → 바퀴 80T (현재, 감속 2:1 · 모터 1회전 161.8 mm)', 'drive.motorGearTeeth': 40, 'drive.wheelGearTeeth': 80 },
+  '80-40': { label: '모터 80T → 바퀴 40T (증속 1:2 · 모터 1회전 647.2 mm)', 'drive.motorGearTeeth': 80, 'drive.wheelGearTeeth': 40 },
+};
+export function applyGearPreset(params, name) {
+  const g = GEAR_PRESETS[name];
+  if (g) for (const [k, v] of Object.entries(g)) if (k !== 'label') params[k] = v;
+  return params;
+}
+
 // [key, default, label, unit, group, note]
 export const PARAM_SPECS = [
   // field
@@ -62,7 +73,8 @@ export const PARAM_SPECS = [
 
   // drive train
   ['drive.wheelDiameterMm', 103, '모터축 바퀴 지름', 'mm', '구동', '실측 10.3cm → 바퀴 1회전 323.6mm'],
-  ['drive.gearRatio', 2, '모터 회전 / 바퀴 회전', '', '구동', '교육자료: 모터 40T → 바퀴 80T (모터 1440 / 바퀴 2880 카운트). 직결이면 1'],
+  ['drive.motorGearTeeth', 40, '모터 구동 기어 잇수', 'T', '구동', '현재 40T. 위 "기어 구성"에서 80T→40T로 바꿀 수 있음'],
+  ['drive.wheelGearTeeth', 80, '동력 전달(바퀴) 기어 잇수', 'T', '구동', '현재 80T. 모터 회전 / 바퀴 회전 = 바퀴 기어 ÷ 모터 기어'],
   ['drive.rightWheelScale', 1.0, '오른쪽 바퀴 유효 지름 배율', '', '구동', '좌우 바퀴 차이 시험용 (1 = 같음)'],
   ['robot.motor1Forward', 1, '모터1 전진 부호', '', '구동', '코드: setMotorSpeeds(+v, −v). 모터1 = 오른쪽(교육자료: 채널1=우)'],
   ['robot.motor2Forward', -1, '모터2 전진 부호', '', '구동', '거울 대칭 장착. 모터2 = 왼쪽'],
@@ -153,7 +165,7 @@ export function migrateParams(saved, dropped) {
 // geometry that cannot be built physically is reported. Returns { params, warnings }.
 const LIMITS = {
   'robot.massKg': [0.5, 100], 'robot.yawInertia': [0.005, 50], 'drive.wheelDiameterMm': [10, 500],
-  'drive.gearRatio': [0.05, 50], 'robot.trackMm': [50, 1000], 'robot.wheelbaseMm': [10, 1000],
+  'drive.motorGearTeeth': [4, 400], 'drive.wheelGearTeeth': [4, 400], 'robot.trackMm': [50, 1000], 'robot.wheelbaseMm': [10, 1000],
   'robot.lengthMm': [50, 2000], 'robot.widthMm': [50, 1000], 'robot.rearOverhangMm': [0, 2000],
   'robot.startGapMm': [0, 2000], 'robot.passiveWheelDiameterMm': [5, 500], 'field.lineWidthMm': [0.5, 200],
   'field.gapMm': [10, 5000], 'field.firstGapMm': [0, 5000], 'field.lastGapMm': [0, 5000],
@@ -214,7 +226,9 @@ const num = (v, d) => (Number.isFinite(Number(v)) && v !== '' && v !== null ? Nu
 // Single source of truth for physics (via resolveParams), analysis and the 3D view.
 export function robotGeometry(p) {
   const D = num(p['drive.wheelDiameterMm'], 103);
-  const G = num(p['drive.gearRatio'], 2) || 1;
+  // motor revolutions per wheel revolution = wheel gear teeth / motor gear teeth (40 -> 80 : 2)
+  const motorT = num(p['drive.motorGearTeeth'], 40), wheelT = num(p['drive.wheelGearTeeth'], 80);
+  const G = motorT > 0 && wheelT > 0 ? wheelT / motorT : 2;
   const r = D / 2;
   const wb = num(p['robot.wheelbaseMm'], 224);
   const driveFrac = num(p['robot.driveWeightFrac'], 0.55);
@@ -231,7 +245,7 @@ export function robotGeometry(p) {
     return { port: num(p[`sensor.${i}.port`], i ? 5 : 4), axle, axleS, fromAxle, s: axleS + fromAxle };
   });
   return {
-    D, r, G, wheelCirc: Math.PI * D, mmPerRev: (Math.PI * D) / G,
+    D, r, G, motorT, wheelT, wheelCirc: Math.PI * D, mmPerRev: (Math.PI * D) / G,
     motorFront, wheelbase: wb, frontAxle, rearAxle, passiveAxle: motorFront ? rearAxle : frontAxle,
     passiveR: rp, frontR: motorFront ? r : rp, rearR: motorFront ? rp : r,
     rearEnd, frontEnd, length: frontEnd - rearEnd, width: num(p['robot.widthMm'], 400), track: num(p['robot.trackMm'], 320),
